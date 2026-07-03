@@ -1,169 +1,427 @@
-# Claude Desktop 3P Model Patch
+# Claude Desktop 3P Patcher
 
-> **🎉 [2026-06-23] 0623 v6 全面适配发布！**
-> 完整 11 处 patch 全部命中并实测验证：
-> - 模型下拉框过滤（L2b/L2c）
-> - session 标题自动摘要兜底（L6）
-> - 3P 模型 `effort=xhigh` 兼容（L7）
-> - 第三方模型（minimax-m3、doubao-seed 等）已在 chat 下拉框可见
-> 详见下方 [🛡️ 0623 适配要点](#-0623-适配要点) 与 [更新日志](#-更新日志-changelog)。
+用于 macOS Claude Desktop 的 3P / Gateway / 本地功能恢复补丁脚本。
 
-> **🎉 [2026-06-23] 0623 基础适配版发布！**
-> 针对 Claude Desktop 0623 (app.asar ~35.7 MB) 的反混淆重写，已实测 5 层 patch 全部命中并验证落盘。
+当前推荐脚本：
 
-> **🎉 [2026-06-04] 终极完美版发布！**
-> 本次更新彻底攻破了最新版 Claude Desktop 带来的终极底层防御，真正实现了 **无痛完美修补**！
-> 1. **原生 ASAR 完整性深度修复**：破解了 Electron 核心 4MB 分块哈希算法（SHA-256 Block Hashing）。我们不再需要暴力修改 Electron C++ 底层文件，而是完美伪造官方签名格式，动态生成绝对匹配的 JSON 头 `integrity` 哈希链，彻底终结 `FATAL Crash` 闪退！
-> 2. **Swift 原生 Cowork 权限接管**：无视重签名丢失官方证书导致的 `@ant/claude-swift` 原生检测拦截 (Invalid installation)。通过直接劫持底层桥接接口，无条件向应用宣告虚拟化 (Virtualization) 完美支持，让最新的 Cowork 功能毫无障碍地运行！
-> 3. **无残留动态清洗**：在重签名的最后防线，动态脱壳提取应用安全凭证，并在内存中智能清洗剔除所有会导致沙盒崩溃的企业专属字段，为你打造真正的纯净客户端。
->
-> 详情请见下方 [🛡️ 官方的 5 层防御及破解思路](#-官方的-5-层防御及破解思路) 及 [更新日志](#-更新日志-changelog)。
+```text
+patch_claude_3p_v2.py
+```
 
-此仓库包含了对 macOS 版本 Claude Desktop 引入的严格“第三方网关模型 (Gateway 3P)”白名单校验机制的完整逆向分析与一键修补脚本，并且**已整合支持中文汉化**。
+当前主适配目标：
 
-## 🎯 目标与背景
+```text
+Claude-0703.dmg / Claude Desktop 1.18286.0
+```
 
-Claude Desktop 最近一次更新大幅收紧了企业网关配置（Cowork Gateway）的限制。系统只允许下拉选择官方白名单内以 `claude-` 或 `anthropic/` 开头的模型。如果你使用任何第三方模型（例如 `minimax-latest`、`doubao-seed` 等），应用会直接报错或在前端隐藏这些模型。
+已完成验证：dry-run、临时 App patch、中文汉化、SkillHub 注入、重签名、`codesign`、直接启动临时 App。
 
-为了绕过这些限制，使其能够接入任意第三方大模型，我们剥开了官方设置的 **5 层严密的防御体系**。
+---
 
-## 🛡️ 0623 适配要点
+## 功能概览
 
-0623 版本与 0604 在 5 层防御机制上保持一致，但每一层的代码都做了反混淆重写，因此**特征码必须全量更新**：
+### 1. 3P / Gateway 模型兼容
 
-| 层 | 0604 旧特征码 | 0623 新特征码 | 替换目标 |
-|---|---|---|---|
-| L1 3P safeParse | `const l=Ewi.safeParse(E);` | `const a=b$i.safeParse(s);` | `var a={data:s,success:1};` |
-| L2 PVt 过滤 | `if(A.length===0)return!1;` | `if(A.startsWith("claude-"))return!0;if(e.length===0)return!1;` | `e.length>=0` → `return!0` |
-| L3a isVirtualizationSupported | 主进程 `require(...)` 调用 | 不再 patch（改走 L3b） | — |
-| L3b claude-swift 劫持 | 注释行替换 | 注释行替换（未变） | `this.vm.isVirtualizationSupported = () => "supported";` |
-| L4 D$t 自动更新 | 无 | `if(A.disableAutoUpdates){D.info("...disabled..."),Ye("...");return}` | `if(0&&A.disableAutoUpda){...}` |
-| L4 _$t 手动检查 | 无 | `if(fi().disableAutoUpdates){D.info("...disabled...");return}` | `if(0&&fi().disableAutoUpda){...}` |
+脚本会 patch Claude Desktop 中的本地校验逻辑，使第三方模型在 3P/Gateway 模式下更可用：
 
-> **L4 的特别说明**：0623 把自动更新检查从 ESM 顶层判断（`if(e.disableAutoUpdates)`）改成了封装在 `D$t` / `_$t` 两个函数里。一次性启动检查走 `D$t`，用户主动「检查更新」走 `_$t`，因此两个函数体都要短路。
+- 绕过 managed config `safeParse` 严格校验；
+- 放开模型选择器白名单；
+- 绕过 gateway model route validator；
+- 绕过 inference model catalog throw；
+- 修复/兼容 3P 模型 `xhigh` effort 不支持的问题；
+- 支持 0703 新版 minified 特征码。
 
-## 🛡️ 官方的 5 层防御及破解思路
+### 2. 自动更新禁用
 
-### 第一层：配置加载层的抛错校验 (JS 层)
-- **机制**：在 `app.asar` 中的 `index.js`，`bZt.safeParse` 对解析到的模型和 `_Zt` 强行校验，如果不符合规范会抛出 `Invalid custom3p enterprise config`。
-- **破解**：利用脚本将 `const o=bZt.safeParse(n);` 修改为强制成功的伪造对象 `var o={data:n,success:1};`，并将抛出 Error 的分支改为 `if(0)`。
+脚本会把更新检查逻辑改为强制早期返回：
 
-### 第二层：前端 UI 下拉框的强过滤 (JS 层)
-- **机制**：即使配置被解析，UI 代码在构建模型选择器下拉框时，依然使用了 `filter(c=>!bbA||LbA(c.id))`、`Ert` 甚至 `UbA` 函数。其中 `UbA` 和 `Ert` 内置了 `startsWith("claude-")` 和 `Lxe.test` 正则匹配，导致第三方模型直接“隐身”。
-- **破解**：直接对这些过滤器函数进行硬编码跳过：
-  - `Ert`: 将 `if(A.length===0)return!1;` 修改为 `if(A.length>=0)return !0;`
-  - 数组过滤: `!bbA||LbA(c.id)` 修改为 `!bbA||1||c.id`
-  - `UbA`: 修改 `if(!bbA)` 为 `if(1   )`，使非官方模型强行获得 `{ok:!0}`。
+```text
+if(1||...)
+```
 
-### 第三层：虚拟化权限导致的 "Invalid installation" 弹窗验证 (Swift 原生插件)
-- **机制**：我们在拆包、修改并重新签名后，丢失了系统自动关联到官方 TeamID 的隐藏 Entitlements（如 `keychain-access-groups` 等）。启动时，内置的 `@ant/claude-swift` 原生插件会调用 `isVirtualizationSupported()` 检查权限，若发现状态不符，将返回 `"entitlement_missing"`。前端捕获后会直接拦截启动，并显示 "Claude's installation appears to be corrupted. Reinstall Claude to use Cowork."。
-- **破解**：我们在重新封包时，直接拦截 `@ant/claude-swift` 模块的 JS 接口暴露点。将原本的虚拟化支持检测接口强行覆写为 `this.vm.isVirtualizationSupported = () => "supported"`。无视任何底层原生安全验证，强行使客户端允许启用 Cowork 功能。
+避免旧版 `if(0&&...)` 导致自动更新仍然放行的问题。
 
-### 第四层：ASAR 文件结构级别的哈希分块校验 (Electron Integrity 机制)
-- **机制**：最新版的 Electron 启用了内置的 ASAR Integrity 校验。它不但会验证整体 Hash，还会将文件切分为 4MB 连续区块，并在每次读取文件时验证区块的 SHA-256 Hash。一旦发现被修改的 JS 文件区块 Hash 不匹配，Electron 的 C++ 层 (`archive.cc:150`) 会直接触发底层断言崩溃 (FATAL Crash)。
-- **破解**：放弃强制擦除 `integrity` 字段的暴力方案。我们在 Python 脚本中完整复刻了 Electron 的哈希分块算法。每次给 JS 注入补丁后，自动按照 4MB 步长重新计算所有被篡改文件的 SHA-256 分块哈希链，并精确对齐 ASAR Payload 的 4 字节边界偏移量，将合法的哈希块完美重写回 `app.asar` 头部 JSON 的 `integrity` 字段。使其在 Electron 看来依然是官方“原封不动”的有效签名文件。
+同时支持额外写入 macOS policy：
 
-### 第五层：终极防御 - 动态防护屏障与应用签名重置
-- **机制**：在突破 ASAR 限制后，应用会被 macOS 系统的 Gatekeeper 及原生校验阻挡，如果签名与 Entitlements 不规范，会在启动时立即崩溃。
-- **破解**：采用无残留深度重签名。脚本会动态提取原生官方应用内的安全配置文件（Entitlements），并在内存中实时过滤清洗掉专属的受限字段（如 `com.apple.application-identifier` 和 `keychain-access-groups` 等），注入自签名需要的 `disable-library-validation` 权限。最后通过清理附加属性（`xattr -cr`）并执行 `codesign --deep` 完美重构沙盒授权。
+```text
+com.anthropic.claudefordesktop disableAutoUpdates = true
+```
 
-## 🔄 更新日志 (Changelog)
+### 3. Cowork / Secure VM 兼容
 
-- **[2026-06-23] 0623 v6 全面实战版（实测 Claude Desktop 1.14271.0）**：
-  - **真实版本验证**：0623 启动后 `_version=1.14271.0`（electron 42.4.0），实测跑通完整流程：
-    - 第三方模型 `minimax-m3` 在 chat 顶部下拉框可见 ✓
-    - 模型发消息不再报 `output_config.effort=xhigh` 错误 ✓
-    - session 标题有本地兜底（minimax-m3 spawn 失败时也能显示）✓
-  - **11 处 patch 全部就位**（v3 → v6 增量）：
-    - **L2b**（35B，等长）：`return e.some(i=>i===A||$d(i)===t)}` → `return e.some(i=>!0);/*padpadpad*/}` —— PVt 终态过滤，第三方 model 直接通过
-    - **L2c**（36B，等长）：`function v4i(A){return PX(A)?{ok:!0}` → `function v4i(A){return 1!==0?{ok:!0}` —— `mcr` 调 `YX(provider, id)` → `v4i(gateway)` → `PX`（黑名单+白名单）；短路后所有 model 通过
-    - **L5a**（25B）：`const c=O$i(A);if(c)throw` → `const c=O$i(A);if(0)throw` —— `O$i` 校验 `inferenceModels` 字段必须 Anthropic catalog 模型
-    - **L5b**（53B）：`const g=C$i(...);if(g)throw` → `const g=C$i(...);if(0)throw` —— `C$i` 校验 provider/models 列表
-    - **L6**（62B ×2 处）：`.catch(Q=>(D.warn("[title-gen] failed",{error:String(Q)}),""))` → `.catch(()=>d.first_session_message.slice(0,46)/*aaaaaaaaaaa*/)` —— session 标题生成（generate_session_title + generate_title_and_branch）失败时返回 first_message 前 46 字符
-    - **L7**（52B，等长）：`function qUA(A){return A!=null&&wQr.has(A)?A:void 0}` → `function qUA(A){return A!=null&&mQr.has(A)?A:void 0}` —— `qUA` 校验 `effortByModel` 字典值；`wQr` 含 `xhigh`（3P 不识别），`mQr` 只 4 个合法值，禁用 xhigh 透传
-  - **结构性改进**：
-    - `patch_index_js` 拆成 6 个分层循环（L1 / L2-L2b / L2c / L4 / L5 / L6 / L7），每处独立 label
-    - `patch_bytes` 改用更严格的多处命中处理（>1 处只 patch 第一处并 warn）
-    - 新增 `CLAUDE_APP_PATH` 环境变量支持（不用 sudo 也能跑）
+脚本会 patch `@ant/claude-swift` 的虚拟化支持检测：
 
-- **[2026-06-23] 0623 基础适配 (v2.0 / v1 基础 5 层)**：
-  - **特征码全量重抓**：0623 重写了 3P 校验栈，所有特征码同步更新 —
-    - L1: `const l=Ewi.safeParse(E);` → `const a=b$i.safeParse(s);`
-    - L2: `if(A.length===0)return!1;` → 完整 `if(A.startsWith("claude-"))return!0;if(e.length===0)return!1;`（用 startsWith 前缀做唯一识别）
-    - L4: 老的 `if(e.disableAutoUpdates)` / `if(ki().disableAutoUpdates)` 不再存在，新版更新检查已迁入 `D$t` / `_$t` 两个函数，patch 改为短路 `if(0&&A.disableAutoUpda)` / `if(0&&fi().disableAutoUpda)`
-  - **claude-swift 劫持点保持稳定**：0604 / 0623 共同的注释行 `// ComputerUse bindings live in a separate SPM product (ComputerUseSwift)` 依然存在，L3b 双保险机制未变。
-  - **重签名更鲁棒**：DMG 挂载点不再写死 `/Volumes/Claude0604/`，改为动态扫描 `/Volumes/Claude*` 找到带 Claude.app 的那个。Entitlements 默认列表补齐 `cs.allow-unsigned-executable-memory` 和 `network.client/server` 等 0623 实测需要的能力。
-  - **结构性改进**：把 5 层 patch 拆成独立函数 + 长特征码 + 命中数校验，杜绝 `e.length===0` 这种通用模式误伤第三方库；`patch_bytes()` 在 0 命中时直接 raise（不再静默 skip）。
+```js
+this.vm.isVirtualizationSupported = () => "supported";
+```
 
-- **[2026-06-23] ASAR 完整性等长 byte 修复**：
-  - 0623 启动会触发 `ASAR Integrity Violation: got a hash mismatch`，根因是 v1 旧 patch 用 `e.length>=0`（3 字节）替代 `e.length===0`（4 字节），**asar 整体缩短 1 字节** 触发 Electron 4MB 分块 SHA-256 校验。
-  - 修复：所有 patch 改用等长 byte 替换（如 `e.length===0` → `e.length===0` + 改 `return!1` 为 `return!0`）。
+并在重签名时保留/注入关键 entitlements：
 
-- **[2026-06-23] Entitlements 字段脱壳清洗**：
-  - 0623 启动时报 `Touch ID authenticator unavailable: keychain-access-group entitlement is missing or incorrect. Expected value: Q6L2SF6YDW.com.anthropic.claude.webauthn`
-  - 修复：ad-hoc 重签后 `xattr -cr` 清理 + `codesign --entitlements` 注入清洗后的 Entitlements（去除 `com.apple.application-identifier` / `team-identifier` / `keychain-access-groups`），保留 `disable-library-validation` 让原生 `.node` 加载。
+- `com.apple.security.virtualization`
+- `com.apple.security.cs.disable-library-validation`
+- `com.apple.security.cs.allow-jit`
 
-- **[2026-06-04] 0604 终极完美版（Cowork / 完整性保护突破）**：
-  - **原生 ASAR 完整性深度修复**：彻底摒弃了修改 Electron C++ Fuse (保险丝) 的暴力破解方式。通过逆向分析 Electron 底层的 4MB 分块哈希验证算法（SHA-256 Block Hashing），在重组 `app.asar` 压缩包时，利用脚本动态计算并重新生成精准合法的 JSON 头部 `integrity` 区块。修复了 ASAR 封装过程中 Payload 偏移量对齐 Bug，实现了对底层校验机制的完美"瞒天过海"，彻底终结运行时 FATAL 闪退。
-  - **Swift 原生权限校验绕过**：修复了因脱离官方签名导致内置原生插件 `@ant/claude-swift` 拦截启动并提示 "Invalid installation" (应用损坏) 的问题。直接切入底层 JS 桥接接口，强制设定虚拟化支持 `this.vm.isVirtualizationSupported = () => "supported"`，确保最新的 Cowork 功能能够完美运行。
-  - **重签名字段清洗**：重写了签名流水线，实现实时脱壳提取 Entitlements 列表并智能清洗企业私有凭证字段（如 `keychain-access-groups` 等），防止重签后引起授权组件连环崩溃。
-- **[之前版本] 动态兼容性升级**：
-  - 更新了前端 JS 层全新的压缩混淆变量名匹配规则。
-  - 支持了动态特征码搜索机制。
-- **[2026-06-04] 完美适配 Claude 0604 版（Cowork / 完整性保护突破）**：
-  - **原生 ASAR 完整性深度修复**：彻底摒弃了修改 Electron C++ Fuse (保险丝) 的暴力破解方式。通过逆向分析 Electron 底层的 4MB 分块哈希验证算法（SHA-256 Block Hashing），在重组 `app.asar` 压缩包时，利用脚本动态计算并重新生成精准合法的 JSON 头部 `integrity` 区块。修复了 ASAR 封装过程中 Payload 偏移量对齐 Bug，实现了对底层校验机制的完美“瞒天过海”，彻底终结运行时 FATAL 闪退。
-  - **Swift 原生权限校验绕过**：修复了因脱离官方签名导致内置原生插件 `@ant/claude-swift` 拦截启动并提示 "Invalid installation" (应用损坏) 的问题。直接切入底层 JS 桥接接口，强制设定虚拟化支持 `this.vm.isVirtualizationSupported = () => "supported"`，确保最新的 Cowork 功能能够完美运行。
-  - **重签名字段清洗**：重写了签名流水线，实现实时脱壳提取 Entitlements 列表并智能清洗企业私有凭证字段（如 `keychain-access-groups` 等），防止重签后引起授权组件连环崩溃。
-- **[之前版本] 动态兼容性升级**：
-  - 更新了前端 JS 层全新的压缩混淆变量名匹配规则。
-  - 支持了动态特征码搜索机制。
+### 4. 会话标题 fallback
 
-## 🚀 使用方法
+当官方 title generation 调用失败时，脚本会使用首条消息生成不同标题：
 
-本项目提供了两个一键化脚本：
-- `patch_claude.py`：用于解除官方第三方模型 (3P) 的严格限制。
-- `patch_claude_zh_cn.py`：用于为 Claude Desktop 安装中文汉化资源。
+```js
+String(first_session_message || "").slice(0,46)
+```
 
-### 执行步骤
-1. 确保 Claude Desktop 已经安装在 `/Applications/Claude.app`。
-2. 彻底退出正在运行的 Claude。
-3. **解除第三方网关限制**：打开终端，进入本仓库目录，执行以下命令：
-   ```bash
-   sudo python3 patch_claude.py
-   ```
-   此脚本会自动备份原始文件，修改 `index.js`，物理断开 Electron 完整性校验，并重新签名。
+这样可以避免失败后所有会话标题为空或相同。
 
-4. **安装中文汉化（可选）**：如果您需要使用中文界面，请继续执行汉化脚本：
-   ```bash
-   sudo /usr/bin/python3 patch_claude_zh_cn.py --user-home "$HOME"
-   ```
-   此脚本会将社区汉化资源注入到应用内，并将当前用户的偏好语言设置为中文。
+说明：provider 级智能摘要标题仍取决于实际 3P provider / gateway 是否支持相关调用。
 
-5. 运行完毕后，重新打开 Claude Desktop。如果您执行了汉化脚本，应用界面将完全显示为中文；同时在自定义网关配置中填入诸如 `minimax-latest`，它也会立刻在下拉框中显示可用！
+### 5. 本地功能恢复
 
-## ⚠️ 维护注意事项
-- 脚本中包含了禁用应用自动更新 (`disableAutoUpdates`) 的补丁，以防止客户端偷偷升级覆盖掉我们的修改。
-- 如果你之后手动覆盖升级了 Claude Desktop 新版本，只需重新执行一次本脚本即可。
-- **关于版本兼容**：由于本工具底层采用了**动态特征匹配**（而不是死板的物理地址），只要官方未来更新没有推翻重写整个安全验证机制（比如只是微调了代码、增加了功能导致文件偏移变化），本脚本大概率依然可以自动找准位置并一键破解！
+新增 `--feature-recovery` 后，脚本会尽量恢复本地可控能力：
 
-## ⚖️ 免责声明与风险提示 (Disclaimer & Risk Warning)
+- 本地 UI 入口恢复；
+- local feature flags；
+- Claude Code tab；
+- 本地 MCP；
+- desktop extensions；
+- extension directory；
+- secure VM features；
+- 本地 skills/plugins/extensions 报告。
 
-本项目仅作学习与技术交流之用（逆向工程与 Electron 安全研究）。请在评估以下风险后谨慎使用：
+涉及的本地偏好键：
 
-1. **服务条款违规 (TOS Violation)**：本脚本修改了 Claude Desktop 的官方二进制文件、底层框架及安全校验机制。此行为**严格违反了 Anthropic 的服务条款 (Terms of Service)**。
-2. **账号封禁风险 (Account Ban)**：使用非官方修改版客户端可能会触发服务端的异常检测，进而导致您的 Anthropic 账号被**限制或永久封禁**。
-3. **系统安全风险 (System Security)**：执行此补丁需要 `sudo` (Root) 权限来修改 `/Applications` 系统目录下的文件，并重新签名应用。**在运行任何需要 Root 权限的第三方脚本前，强烈建议您自行审查源码。** 修改应用的签名和 Entitlements 可能会改变应用原有的沙盒隔离机制。
-4. **无担保 (No Warranty)**：**作者不对任何因使用本脚本（包括但不限于账号封禁、数据丢失、系统崩溃、应用损坏或任何法律纠纷）承担任何直接或间接责任。使用本工具产生的任何后果由使用者完全自负。**
+```text
+secureVmFeaturesEnabled
+isDesktopExtensionEnabled
+isDesktopExtensionDirectoryEnabled
+isLocalDevMcpEnabled
+isClaudeCodeForDesktopEnabled
+```
 
-## 🙏 致谢 (Acknowledgments)
+### 6. SkillHub 技能社区入口
 
-本项目中整合的**中文汉化 (i18n)** 资源主要来源于开源社区的无私贡献，特别感谢以下项目及原作者：
-- [javaht/claude-desktop-zh-cn](https://github.com/javaht/claude-desktop-zh-cn) - 感谢其提供的全面且优质的 Claude Desktop 汉化资源文件（涵盖前端 UI、客户端菜单及各项提示信息的完整翻译）。
+支持把 SkillHub 作为技能社区入口注入到插件/技能相关页面：
 
-## 📄 开源协议 (License)
+```text
+https://skillhub.cn/
+```
 
-本项目基于 [MIT License](https://opensource.org/licenses/MIT) 开源。
+相关参数：
 
-> **The MIT License (MIT)**
-> 
-> 本软件按“原样”提供，不带有任何明示或暗示的担保，包括但不限于对适销性、特定用途的适用性和非侵权性的担保。在任何情况下，作者或版权持有人均不对因软件或软件的使用或其他交易而产生的任何索赔、损害或其他责任负责，无论是在合同诉讼、侵权诉讼或其他诉讼中。
+```bash
+--embed-skillhub
+--skillhub-url https://skillhub.cn/
+```
+
+脚本只注入入口链接，不会自动下载、安装或执行远程内容。
+
+### 7. 本地 skills/plugins 管理报告
+
+支持扫描本地 skills/plugins/extensions 目录：
+
+```bash
+--local-market-report
+```
+
+默认扫描：
+
+```text
+~/.claude/skills
+~/.claude/plugins
+~/.claude/workflows
+~/Library/Application Support/Claude
+~/Library/Application Support/Claude/extensions
+~/Library/Application Support/Claude/plugins
+~/Library/Application Support/Claude/skills
+```
+
+### 8. 中文汉化
+
+新版脚本已合并中文汉化流程：
+
+```bash
+--zh-cn
+--lang zh-CN
+--lang zh-TW
+--lang zh-HK
+```
+
+支持：
+
+- frontend i18n 资源安装；
+- desktop shell 语言资源安装；
+- hardcoded frontend strings 替换；
+- main process menu labels 替换；
+- language display names patch；
+- 0703 语言选择器白名单 patch；
+- 可选设置用户 locale。
+
+0703 语言白名单位置已适配：旧逻辑只扫描 `index-*.js`，新版会在失败后扫描 `Contents/Resources/ion-dist/assets/v1/*.js`，当前已验证命中：
+
+```text
+Contents/Resources/ion-dist/assets/v1/c4b350ac1-BTR_0NaM.js
+```
+
+并写入：
+
+```js
+"zh-CN"
+```
+
+---
+
+## 文件说明
+
+| 文件 | 说明 |
+|---|---|
+| `patch_claude_3p_v2.py` | 当前推荐主脚本，支持 0703、3P patch、本地功能恢复、SkillHub、中文汉化、签名验证 |
+| `patch_claude.py` | 旧版 0604/0623 基线脚本，保留作参考 |
+| `patch_claude_zh_cn.py` | 独立中文汉化脚本，新版主脚本会复用其中的汉化逻辑 |
+| `resources/` | 中文汉化资源目录 |
+| `Claude-0703.dmg` | 0703 安装包，推荐从此 DMG 复制临时 App 后 patch |
+| `AGENTS.md` | 开发/维护记录，包含关键变量、patch 层、验证状态和后续维护提示 |
+
+---
+
+## 使用方法
+
+### 1. Dry-run，不修改系统 App
+
+推荐每次新版本都先执行 dry-run：
+
+```bash
+python3 patch_claude_3p_v2.py \
+  --from-dmg \
+  --dmg Claude-0703.dmg \
+  --dry-run \
+  --provider gateway \
+  --feature-recovery \
+  --embed-skillhub \
+  --zh-cn \
+  --local-market-report \
+  --report-json /tmp/claude-3p-feature-dryrun.json
+```
+
+### 2. Patch 临时 App，但不安装
+
+```bash
+python3 patch_claude_3p_v2.py \
+  --from-dmg \
+  --dmg Claude-0703.dmg \
+  --provider gateway \
+  --feature-recovery \
+  --embed-skillhub \
+  --zh-cn \
+  --local-market-report \
+  --report-json /tmp/claude-3p-feature-patched.json
+```
+
+脚本会输出临时目录里的 `Claude.app` 路径，可先检查报告和签名结果。
+
+### 3. 安装到 `/Applications`
+
+确认 dry-run 和临时 App patch 都正常后，再安装：
+
+```bash
+sudo python3 patch_claude_3p_v2.py \
+  --from-dmg \
+  --dmg Claude-0703.dmg \
+  --provider gateway \
+  --feature-recovery \
+  --embed-skillhub \
+  --zh-cn \
+  --local-market-report \
+  --install \
+  --launch
+```
+
+脚本会在替换前备份原 App。
+
+### 4. 只禁用自动更新 policy
+
+```bash
+sudo python3 patch_claude_3p_v2.py \
+  --check-only \
+  --write-policy \
+  --provider gateway
+```
+
+### 5. 只检查本地 skills/plugins/extensions
+
+```bash
+python3 patch_claude_3p_v2.py \
+  --check-only \
+  --local-market-report \
+  --provider gateway
+```
+
+### 6. 只启用本地 Claude Code / MCP / extension 偏好
+
+```bash
+python3 patch_claude_3p_v2.py \
+  --check-only \
+  --enable-local-code-features \
+  --local-market-report \
+  --provider gateway
+```
+
+---
+
+## 常用参数
+
+| 参数 | 说明 |
+|---|---|
+| `--from-dmg` | 从 DMG 复制 Claude.app 到临时目录后 patch |
+| `--dmg <path>` | 指定 DMG，默认可用 `Claude-0703.dmg` |
+| `--app <path>` | 指定已安装的 Claude.app，默认 `/Applications/Claude.app` |
+| `--dry-run` | 只检查 patch 命中情况，不写入 App |
+| `--install` | 把 patch 后的临时 App 安装到 `--app` |
+| `--launch` | 安装后启动 Claude |
+| `--provider` | 指定 provider 报告类型：`gateway` / `anthropic` / `bedrock` / `vertex` / `foundry` / `aws` / `unknown` |
+| `--report-json <path>` | 输出 JSON 报告 |
+| `--write-policy` | 写入系统级禁用自动更新 policy |
+| `--feature-recovery` | 启用本地功能恢复组合项 |
+| `--enable-local-code-features` | 写入本地 Claude Code / MCP / extension 偏好 |
+| `--local-market-report` | 输出本地 skills/plugins/extensions 报告 |
+| `--embed-skillhub` | 注入 SkillHub 技能社区入口 |
+| `--skillhub-url <url>` | 自定义 SkillHub 地址 |
+| `--zh-cn` | 安装简体中文资源 |
+| `--lang <code>` | 安装指定中文资源：`zh-CN` / `zh-TW` / `zh-HK` |
+| `--user-home <path>` | 指定用户 home，用于 locale 和本地目录报告 |
+
+---
+
+## 验证记录
+
+当前版本已执行过以下验证。
+
+### 语法检查
+
+```bash
+python3 -m py_compile patch_claude.py patch_claude_3p_v2.py patch_claude_zh_cn.py
+```
+
+结果：通过。
+
+### 0703 dry-run
+
+```bash
+python3 patch_claude_3p_v2.py \
+  --from-dmg \
+  --dmg Claude-0703.dmg \
+  --dry-run \
+  --provider gateway \
+  --feature-recovery \
+  --embed-skillhub \
+  --zh-cn \
+  --local-market-report \
+  --report-json /tmp/claude-3p-feature-dryrun.json
+```
+
+结果：L1/L2/L2b/L2c/L4/L6/L7/L3b 均命中，SkillHub、本地功能恢复、中文汉化均显示 `would_patch`。
+
+### 临时 App 实际 patch + 功能恢复 + SkillHub + 中文汉化
+
+最新验证命令：
+
+```bash
+python3 patch_claude_3p_v2.py \
+  --from-dmg \
+  --dmg Claude-0703.dmg \
+  --provider gateway \
+  --feature-recovery \
+  --embed-skillhub \
+  --zh-cn \
+  --local-market-report \
+  --report-json /tmp/claude-3p-langfix.json
+```
+
+结果：
+
+```text
+ASAR: patched
+Signing: signed
+codesign verify: OK
+SkillHub UI patch: patched https://skillhub.cn/
+Local feature UI patch: patched
+Localization: patched zh-CN 简体中文
+Patched language whitelist: c4b350ac1-BTR_0NaM.js
+```
+
+语言白名单验证：
+
+```text
+whitelist has zh-CN: True
+zh-CN locale exists: True
+desktop shell exists: True
+```
+
+实际白名单片段：
+
+```js
+S1=["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt-BR","id-ID","zh-CN"];
+```
+
+临时 App 启动验证：通过。当前已验证可直接启动临时 App binary，不再出现 `SyntaxError: Unexpected token ';'`。
+
+---
+
+## 更新日志
+
+### 2026-07-03 — 0703 语言白名单修复
+
+- 修复 0703 App 内语言选择器不显示“简体中文”的问题；
+- 在 `patch_claude_3p_v2.py` 的 `apply_localization()` 中加入 fallback 扫描逻辑；
+- 旧逻辑失败后扫描 `Contents/Resources/ion-dist/assets/v1/*.js`；
+- 当前验证命中文件：`c4b350ac1-BTR_0NaM.js`；
+- 已验证 `zh-CN` 被写入语言白名单，中文资源文件存在，临时 App 可启动。
+
+### 2026-07-03 — FrA gateway validator 语法修复
+
+- 修复 0703 `FrA` gateway validator patch 生成非法 JS 的问题；
+- 旧错误形态：`return 1!==0?{ok:!0};` 缺少三元表达式 `:` 分支；
+- 新 patch 改为合法且等长的 `if(1)return{ok:!0};` 加空格 padding；
+- 已通过 `node --check` 与临时 App 启动验证。
+
+### 2026-07-03 — feature-recovery 增强
+
+- 新增 `--feature-recovery`；
+- 新增 `--enable-local-code-features`；
+- 新增 `--local-market-report`；
+- 新增 `--embed-skillhub` / `--skillhub-url`；
+- 新增 `--zh-cn` / `--lang`；
+- 合并中文汉化流程；
+- 加强 session title fallback；
+- 新增本地 SkillHub 技能社区入口；
+- 新增本地 skills/plugins/extensions 扫描报告；
+- 调整临时 App patch 时的本地偏好写入逻辑，避免未安装时改用户配置。
+
+### 2026-07-03 — 0703 v2 安全工作流
+
+- 新增 `patch_claude_3p_v2.py`；
+- 支持从 `Claude-0703.dmg` 复制临时 App 后 patch；
+- 默认不覆盖 `/Applications/Claude.app`；
+- 适配 Claude Desktop `1.18286.0`；
+- 新增 0703 特征码；
+- 自动更新 patch 改为 `if(1||...)` 强制早期返回；
+- 新增 policy / provider capability report；
+- 支持 JSON 报告；
+- 支持重签名和 `codesign` 验证。
+
+### 2026-06-23 — 0623 基线适配
+
+- 适配 0623 版本；
+- 解除模型下拉框过滤；
+- 增加 gateway validator 绕过；
+- 增加 session title fallback；
+- 兼容 3P 模型 effort；
+- 保留为 `patch_claude.py` 旧版基线。
+
+---
+
+## 注意事项
+
+1. 本项目会修改 Claude Desktop 的本地 App bundle，并进行 ad-hoc 重签名。
+2. 安装到 `/Applications` 需要 `sudo`。
+3. 每次新 Claude Desktop 版本都应先执行 `--dry-run`。
+4. 官方云端授权能力无法通过本地 patch 保证恢复。
+5. SkillHub 当前作为外部社区入口注入，不自动安装远程内容。
+6. 如手动覆盖升级 Claude Desktop，需要重新执行 patch。

@@ -194,24 +194,24 @@ def patch_index_js(data, header, base_offset):
             idx = patch_bytes(idx, orig, repl, label=label)
             applied.append(label)
 
-    # Layer 4: 关闭 D$t / _$t 中的自动更新检查
+    # Layer 4: 强制禁用 D$t / _$t 中的自动更新检查
     # 新版 D$t: if(A.disableAutoUpdates){D.info("[updater] Auto-updates disabled by enterprise policy"),Ye("desktop_update_disabled",{reason:"enterprise_policy"});return}
-    #   → 改为 if(0){...} 即可短路（保持等长）
+    #   → 改为 if(1||A.disableAutoUpda){...}，无论企业配置是否设置都早期返回（保持等长）
     # 新版 _$t: if(fi().disableAutoUpdates){D.info("[updater] Auto-updates disabled by enterprise policy");return}
-    #   → 改为 if(0&&fi().disableAutoUpda){...} 保持等长
+    #   → 改为 if(1||fi().disableAutoUpda){...}，用户主动检查更新也直接返回（保持等长）
     for orig, repl, label in [
         (b'if(A.disableAutoUpdates){D.info("[updater] Auto-updates disabled by enterprise policy"),Ye("desktop_update_disabled",{reason:"enterprise_policy"});return}',
-         b'if(0&&A.disableAutoUpda){D.info("[updater] Auto-updates disabled by enterprise policy"),Ye("desktop_update_disabled",{reason:"enterprise_policy"});return}',
+         b'if(1||A.disableAutoUpda){D.info("[updater] Auto-updates disabled by enterprise policy"),Ye("desktop_update_disabled",{reason:"enterprise_policy"});return}',
          "L4 D$t disableAutoUpdates"),
         (b'if(fi().disableAutoUpdates){D.info("[updater] Auto-updates disabled by enterprise policy");return}',
-         b'if(0&&fi().disableAutoUpda){D.info("[updater] Auto-updates disabled by enterprise policy");return}',
+         b'if(1||fi().disableAutoUpda){D.info("[updater] Auto-updates disabled by enterprise policy");return}',
          "L4 _$t disableAutoUpdates"),
         # 兼容老版（0604）写法
         (b'if(e.disableAutoUpdates)',
-         b'if(0&&e.disableAutoU)',
+         b'if(1||e.disableAutoU)',
          "L4 legacy if(e.disableAutoUpdates)"),
         (b'if(ki().disableAutoUpdates)',
-         b'if(0&&ki().disableAutoU)',
+         b'if(1||ki().disableAutoU)',
          "L4 legacy if(ki().disableAutoUpdates)"),
     ]:
         if orig in idx:
