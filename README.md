@@ -14,7 +14,7 @@ patch_claude_3p_v2.py
 Claude-0703.dmg / Claude Desktop 1.18286.0
 ```
 
-已完成验证：dry-run、临时 App patch、中文汉化、SkillHub 注入、重签名、`codesign`、直接启动临时 App。
+已完成验证：dry-run、临时 App patch、中文汉化、重签名、`codesign`、直接启动临时 App。
 
 ---
 
@@ -96,24 +96,7 @@ isLocalDevMcpEnabled
 isClaudeCodeForDesktopEnabled
 ```
 
-### 6. SkillHub 技能社区入口
-
-支持把 SkillHub 作为技能社区入口注入到插件/技能相关页面：
-
-```text
-https://skillhub.cn/
-```
-
-相关参数：
-
-```bash
---embed-skillhub
---skillhub-url https://skillhub.cn/
-```
-
-脚本只注入入口链接，不会自动下载、安装或执行远程内容。
-
-### 7. 本地 skills/plugins 管理报告
+### 6. 本地 skills/plugins 管理报告
 
 支持扫描本地 skills/plugins/extensions 目录：
 
@@ -133,7 +116,7 @@ https://skillhub.cn/
 ~/Library/Application Support/Claude/skills
 ```
 
-### 8. 中文汉化
+### 7. 中文汉化
 
 新版脚本已合并中文汉化流程：
 
@@ -172,7 +155,7 @@ Contents/Resources/ion-dist/assets/v1/c4b350ac1-BTR_0NaM.js
 
 | 文件 | 说明 |
 |---|---|
-| `patch_claude_3p_v2.py` | 当前推荐主脚本，支持 0703、3P patch、本地功能恢复、SkillHub、中文汉化、签名验证 |
+| `patch_claude_3p_v2.py` | 当前推荐主脚本，支持 0703、3P patch、本地功能恢复、中文汉化、签名验证 |
 | `patch_claude.py` | 旧版 0604/0623 基线脚本，保留作参考 |
 | `patch_claude_zh_cn.py` | 独立中文汉化脚本，新版主脚本会复用其中的汉化逻辑 |
 | `resources/` | 中文汉化资源目录 |
@@ -194,7 +177,6 @@ python3 patch_claude_3p_v2.py \
   --dry-run \
   --provider gateway \
   --feature-recovery \
-  --embed-skillhub \
   --zh-cn \
   --local-market-report \
   --report-json /tmp/claude-3p-feature-dryrun.json
@@ -208,7 +190,6 @@ python3 patch_claude_3p_v2.py \
   --dmg Claude-0703.dmg \
   --provider gateway \
   --feature-recovery \
-  --embed-skillhub \
   --zh-cn \
   --local-market-report \
   --report-json /tmp/claude-3p-feature-patched.json
@@ -226,7 +207,6 @@ sudo python3 patch_claude_3p_v2.py \
   --dmg Claude-0703.dmg \
   --provider gateway \
   --feature-recovery \
-  --embed-skillhub \
   --zh-cn \
   --local-market-report \
   --install \
@@ -281,8 +261,6 @@ python3 patch_claude_3p_v2.py \
 | `--feature-recovery` | 启用本地功能恢复组合项 |
 | `--enable-local-code-features` | 写入本地 Claude Code / MCP / extension 偏好 |
 | `--local-market-report` | 输出本地 skills/plugins/extensions 报告 |
-| `--embed-skillhub` | 注入 SkillHub 技能社区入口 |
-| `--skillhub-url <url>` | 自定义 SkillHub 地址 |
 | `--zh-cn` | 安装简体中文资源 |
 | `--lang <code>` | 安装指定中文资源：`zh-CN` / `zh-TW` / `zh-HK` |
 | `--user-home <path>` | 指定用户 home，用于 locale 和本地目录报告 |
@@ -310,15 +288,14 @@ python3 patch_claude_3p_v2.py \
   --dry-run \
   --provider gateway \
   --feature-recovery \
-  --embed-skillhub \
   --zh-cn \
   --local-market-report \
   --report-json /tmp/claude-3p-feature-dryrun.json
 ```
 
-结果：L1/L2/L2b/L2c/L4/L6/L7/L3b 均命中，SkillHub、本地功能恢复、中文汉化均显示 `would_patch`。
+结果：L1/L2/L2b/L2c/L4/L6/L7/L3b 均命中，本地功能恢复、中文汉化均显示 `would_patch`。
 
-### 临时 App 实际 patch + 功能恢复 + SkillHub + 中文汉化
+### 临时 App 实际 patch + 功能恢复 + 中文汉化
 
 最新验证命令：
 
@@ -328,7 +305,6 @@ python3 patch_claude_3p_v2.py \
   --dmg Claude-0703.dmg \
   --provider gateway \
   --feature-recovery \
-  --embed-skillhub \
   --zh-cn \
   --local-market-report \
   --report-json /tmp/claude-3p-langfix.json
@@ -340,7 +316,6 @@ python3 patch_claude_3p_v2.py \
 ASAR: patched
 Signing: signed
 codesign verify: OK
-SkillHub UI patch: patched https://skillhub.cn/
 Local feature UI patch: patched
 Localization: patched zh-CN 简体中文
 Patched language whitelist: c4b350ac1-BTR_0NaM.js
@@ -368,7 +343,7 @@ S1=["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt
 
 ### 2026-07-03 — 0703 语言白名单修复
 
-- 修复 0703 App 内语言选择器不显示“简体中文”的问题；
+- 修复 0703 App 内语言选择器不显示"简体中文"的问题；
 - 在 `patch_claude_3p_v2.py` 的 `apply_localization()` 中加入 fallback 扫描逻辑；
 - 旧逻辑失败后扫描 `Contents/Resources/ion-dist/assets/v1/*.js`；
 - 当前验证命中文件：`c4b350ac1-BTR_0NaM.js`；
@@ -386,11 +361,9 @@ S1=["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt
 - 新增 `--feature-recovery`；
 - 新增 `--enable-local-code-features`；
 - 新增 `--local-market-report`；
-- 新增 `--embed-skillhub` / `--skillhub-url`；
 - 新增 `--zh-cn` / `--lang`；
 - 合并中文汉化流程；
 - 加强 session title fallback；
-- 新增本地 SkillHub 技能社区入口；
 - 新增本地 skills/plugins/extensions 扫描报告；
 - 调整临时 App patch 时的本地偏好写入逻辑，避免未安装时改用户配置。
 
@@ -423,5 +396,4 @@ S1=["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt
 2. 安装到 `/Applications` 需要 `sudo`。
 3. 每次新 Claude Desktop 版本都应先执行 `--dry-run`。
 4. 官方云端授权能力无法通过本地 patch 保证恢复。
-5. SkillHub 当前作为外部社区入口注入，不自动安装远程内容。
-6. 如手动覆盖升级 Claude Desktop，需要重新执行 patch。
+5. 如手动覆盖升级 Claude Desktop，需要重新执行 patch。

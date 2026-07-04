@@ -41,7 +41,6 @@ ASAR_INDEX = ".vite/build/index.js"
 ASAR_SWIFT = "node_modules/@ant/claude-swift/js/index.js"
 ASAR_INTEGRITY_BLOCK_SIZE = 4 * 1024 * 1024
 POLICY_DOMAIN = "com.anthropic.claudefordesktop"
-DEFAULT_SKILLHUB_URL = "https://skillhub.cn/"
 FRONTEND_ASSETS_REL = Path("Contents/Resources/ion-dist/assets/v1")
 
 RESTRICTED_ENTITLEMENTS = {
@@ -640,37 +639,6 @@ def append_frontend_injection(app: Path, marker: str, code: str, *, dry_run: boo
     return {"status": "already_applied", "marker": marker, "files": already}
 
 
-def patch_skillhub_entry(app: Path, skillhub_url: str, *, dry_run: bool = False) -> dict[str, Any]:
-    marker = "__claudeSkillHubPatch"
-    url_json = json.dumps(skillhub_url)
-    code = f'''
-(()=>{{
-  const MARK="{marker}";
-  if(window[MARK]) return;
-  window[MARK]=true;
-  const URL={url_json};
-  const LABEL="SkillHub 技能社区";
-  function add(){{
-    const text=(document.body&&document.body.innerText)||"";
-    if(!/Plugins|Skills|插件|技能|Extensions|扩展|Connectors|连接器/.test(text)) return;
-    if(document.getElementById("claude-skillhub-link")) return;
-    const a=document.createElement("a");
-    a.id="claude-skillhub-link";
-    a.href=URL;
-    a.target="_blank";
-    a.rel="noopener noreferrer";
-    a.textContent=LABEL;
-    a.style.cssText="position:fixed;right:18px;bottom:18px;z-index:2147483647;padding:9px 12px;border-radius:10px;background:#111827;color:#fff;text-decoration:none;font:13px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.18)";
-    document.body.appendChild(a);
-  }}
-  add();
-  setInterval(add,2500);
-}})();
-'''
-    result = append_frontend_injection(app, marker, code, dry_run=dry_run)
-    result["url"] = skillhub_url
-    return result
-
 
 def patch_local_feature_ui(app: Path, *, dry_run: bool = False) -> dict[str, Any]:
     marker = "__claudeLocalFeatureRecoveryPatch"
@@ -739,7 +707,7 @@ def inspect_local_item(path: Path) -> dict[str, Any]:
     }
 
 
-def local_market_report(user_home: Path, skillhub_url: str) -> dict[str, Any]:
+def local_market_report(user_home: Path) -> dict[str, Any]:
     candidates = [
         ("claude_user_skills", user_home / ".claude" / "skills"),
         ("claude_user_plugins", user_home / ".claude" / "plugins"),
@@ -760,9 +728,8 @@ def local_market_report(user_home: Path, skillhub_url: str) -> dict[str, Any]:
             entry["item_count"] = 0
         dirs.append(entry)
     return {
-        "skillhub_url": skillhub_url,
         "mode": "local_report_only",
-        "note": "SkillHub is treated as an external/community skills source; no remote code is downloaded automatically.",
+        "note": "Local skills/plugins/extensions directories are scanned; no remote content is downloaded.",
         "directories": dirs,
     }
 
@@ -932,11 +899,9 @@ def print_report(report: dict[str, Any]) -> None:
         print(f"Local feature preferences: {lf.get('status')} keys={lf.get('keys')}")
     if "local_market" in report:
         lm = report["local_market"]
-        print(f"Local skills/plugins report: SkillHub={lm.get('skillhub_url')}")
+        print(f"Local skills/plugins report:")
         for d in lm.get("directories", []):
             print(f"  {d.get('label')}: exists={d.get('exists')} items={d.get('item_count')}")
-    if "skillhub" in report:
-        print(f"SkillHub UI patch: {report['skillhub'].get('status')} {report['skillhub'].get('url')}")
     if "local_feature_ui" in report:
         print(f"Local feature UI patch: {report['local_feature_ui'].get('status')}")
     if "localization" in report:
@@ -950,6 +915,13 @@ def print_report(report: dict[str, Any]) -> None:
         for k, v in cap.get("provider_specific", {}).items():
             print(f"  {k}: {v}")
         print(f"Context compaction: {cap.get('context_compaction')}")
+    print("-" * 72)
+    print("3P mode local capability notes")
+    print("  - Local MCP servers: Settings -> Developer -> Local MCP (or `claude mcp add`).")
+    print("  - Local skills folder: ~/.claude/skills/<skill>/SKILL.md")
+    print("  - Local plugins folder: ~/.claude/plugins/")
+    print("  - Local extension sideload: Settings -> Extensions -> Install from local file")
+    print("  - Official plugin marketplace browse: server-gated by org subscription; not locally unlockable.")
     print("=" * 72)
 
 
@@ -971,8 +943,6 @@ def main() -> int:
     parser.add_argument("--feature-recovery", action="store_true", help="Enable all local feature-recovery patches and user preference writes")
     parser.add_argument("--enable-local-code-features", action="store_true", help="Write user defaults enabling local Claude Code, MCP, desktop extensions, extension directory and secure VM features")
     parser.add_argument("--local-market-report", action="store_true", help="Report local skills/plugins/extensions directories without installing remote content")
-    parser.add_argument("--skillhub-url", default=DEFAULT_SKILLHUB_URL, help="SkillHub/community skills URL to report or embed")
-    parser.add_argument("--embed-skillhub", action="store_true", help="Add a SkillHub community link to the local plugins/skills UI")
     parser.add_argument("--lang", choices=LANG_CHOICES, default=None, help="Install Chinese localization resources into the patched app")
     parser.add_argument("--zh-cn", action="store_true", help="Shortcut for --lang zh-CN")
     parser.add_argument("--user-home", type=Path, default=Path.home(), help="User home for Claude config and local skills/plugins reports")
@@ -1005,10 +975,9 @@ def main() -> int:
         report["app"] = app_metadata(target_app)
         report["policy"] = check_enterprise_policy()
         report["capabilities"] = provider_expectations(args.provider)
-        report["skillhub_source"] = {"url": args.skillhub_url, "mode": "external_community_entry"}
 
         if args.local_market_report or args.feature_recovery:
-            report["local_market"] = local_market_report(args.user_home, args.skillhub_url)
+            report["local_market"] = local_market_report(args.user_home)
 
         if args.enable_local_code_features or args.feature_recovery:
             prefs_dry_run = args.dry_run or args.check_only or ((args.from_dmg or args.dmg) and not args.install)
@@ -1025,8 +994,6 @@ def main() -> int:
             report["asar"] = patch_asar(target_app, dry_run=args.dry_run)
             if args.feature_recovery:
                 report["local_feature_ui"] = patch_local_feature_ui(target_app, dry_run=args.dry_run)
-            if args.embed_skillhub or args.feature_recovery:
-                report["skillhub"] = patch_skillhub_entry(target_app, args.skillhub_url, dry_run=args.dry_run)
             if args.lang:
                 report["localization"] = apply_localization(target_app, args.lang, args.user_home, dry_run=args.dry_run, set_user_config=args.install)
             report["app"] = app_metadata(target_app)
