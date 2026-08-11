@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Claude Desktop 3P patcher v2 (0703-aware)
+Claude Desktop 3P patcher v2 (0811-aware)
 ==========================================
 
 Safer successor to patch_claude.py. It can patch an installed Claude.app or copy
@@ -30,14 +30,17 @@ import sys
 import tempfile
 import importlib.util
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 APP_DEFAULT = Path("/Applications/Claude.app")
 ROOT = Path(__file__).resolve().parent
-DEFAULT_DMG = ROOT / "Claude-0703.dmg"
+DEFAULT_DMG = ROOT / "Claude-0811.dmg"
 APP_ASAR_REL = Path("Contents/Resources/app.asar")
 ASAR_INDEX = ".vite/build/index.js"
+# 0811+ splits the bundle into many index.chunk-*.js / index2.chunk-*.js files
+# plus the preload; the index patch layers must scan all of them.
+ASAR_INDEX_PREFIX = ".vite/build/index"
 ASAR_SWIFT = "node_modules/@ant/claude-swift/js/index.js"
 ASAR_INTEGRITY_BLOCK_SIZE = 4 * 1024 * 1024
 POLICY_DOMAIN = "com.anthropic.claudefordesktop"
@@ -191,6 +194,25 @@ def get_asar_file_entry(header: dict[str, Any], file_path: str) -> dict[str, Any
     return node
 
 
+def iter_asar_file_paths(node: dict[str, Any], prefix: str = "") -> Iterable[str]:
+    if not isinstance(node, dict):
+        return
+    if "files" in node:
+        for name, child in node["files"].items():
+            path = f"{prefix}/{name}" if prefix else name
+            yield from iter_asar_file_paths(child, path)
+    elif "offset" in node:
+        yield prefix
+
+
+def find_index_build_files(header: dict[str, Any]) -> list[str]:
+    return sorted(
+        p
+        for p in iter_asar_file_paths(header)
+        if p.startswith(ASAR_INDEX_PREFIX) and p.endswith(".js")
+    )
+
+
 def calculate_file_integrity(data: bytes) -> dict[str, Any]:
     blocks = [
         hashlib.sha256(data[offset : offset + ASAR_INTEGRITY_BLOCK_SIZE]).hexdigest()
@@ -300,6 +322,12 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 (b'const a=b$i.safeParse(s);', b'var a={data:s,success:1};', False),
                 (b'const l=Ewi.safeParse(E);', b'var l={data:E,success:1};', False),
                 (b'const s=jci.safeParse(o);', b'var s={data:o,success:1};', False),
+                # 0811: safeParse + throw guard in one range; fake success + dead guard.
+                (
+                    b'let s=um.safeParse(o);if(!s.success)throw',
+                    pad_bytes(b'let s={data:o,success:1};if(0)throw', len(b'let s=um.safeParse(o);if(!s.success)throw')),
+                    False,
+                ),
             ],
         ),
         (
@@ -307,6 +335,10 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
             [
                 (b'if(A.startsWith("claude-"))return!0;if(e.length===0)return!1;', b'if(A.startsWith("claude-"))return!0;if(e.length===0)return!0;', False),
                 (b'if(e.startsWith("claude-"))return!0;if(A.length===0)return!1;', b'if(e.startsWith("claude-"))return!0;if(A.length===0)return!0;', False),
+                # 0811: the claude- allowlist became a model-ID validator (Vertex).
+                # de lives in a renderer chunk, YB in the preload; both are patched.
+                (b'de(e){return e.toLowerCase().startsWith(`claude-`)?{ok:!0}:{ok:!1,reason:', b'de(e){return e.toLowerCase().startsWith(`claude-`)?{ok:!0}:{ok:!0,reason:', False),
+                (b'YB(e){return e.toLowerCase().startsWith(`claude-`)?{ok:!0}:{ok:!1,reason:', b'YB(e){return e.toLowerCase().startsWith(`claude-`)?{ok:!0}:{ok:!0,reason:', False),
             ],
         ),
         (
@@ -314,6 +346,9 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
             [
                 (b'return e.some(i=>i===A||$d(i)===t)}', b'return e.some(i=>!0);/*padpadpad*/}', False),
                 (b'return e.some(r=>r===A||qB(r)===t)}', b'return e.some(r=>!0);/*padpadpad*/}', False),
+                # 0811: the terminal some() allowlist is gone; model visibility is now
+                # gated by the {ok:!1,reason:} validators handled in L2/L2c, so no new
+                # signature here.
             ],
         ),
         (
@@ -326,6 +361,15 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                     pad_bytes(b'function FrA(A,e){if(1)return{ok:!0};', len(b'function FrA(A,e){if(A===void 0)return{ok:!0};')),
                     False,
                 ),
+                # 0811: model route validators per provider return {ok:!1,reason:} for
+                # non-Anthropic IDs; flip each to {ok:!0} so gateway/3P models pass.
+                # Chunk names: me=gateway, fe=Foundry, pe=Anthropic; preload copies: QB/XB/ZB.
+                (b'function me(e){return ce(e)?{ok:!0}:{ok:!1,reason:', b'function me(e){return ce(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function fe(e){return ce(e)?{ok:!0}:{ok:!1,reason:', b'function fe(e){return ce(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function pe(e){return ce(e)?{ok:!0}:{ok:!1,reason:', b'function pe(e){return ce(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function QB(e){return qB(e)?{ok:!0}:{ok:!1,reason:', b'function QB(e){return qB(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function XB(e){return qB(e)?{ok:!0}:{ok:!1,reason:', b'function XB(e){return qB(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function ZB(e){return qB(e)?{ok:!0}:{ok:!1,reason:', b'function ZB(e){return qB(e)?{ok:!0}:{ok:!0,reason:', False),
             ],
         ),
         (
@@ -353,6 +397,11 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 ),
                 (b'if(e.disableAutoUpdates)', pad_bytes(b'if(1||e.disableAutoU)', len(b'if(e.disableAutoUpdates)')), False),
                 (b'if(ki().disableAutoUpdates)', pad_bytes(b'if(1||ki().disableAutoU)', len(b'if(ki().disableAutoUpdates)')), False),
+                # 0811 updater entry (index.chunk-D89KYcyB.js). allow_multi for a.a()
+                # since the same guard appears in all three updater entry points.
+                # Note: keep the closing `)` of the if-condition (`disabled){` -> `dis){`).
+                (b'if(r.autoUpdate.disabled){', pad_bytes(b'if(1||r.autoUpdate.dis){', len(b'if(r.autoUpdate.disabled){')), False),
+                (b'if(a.a().autoUpdate.disabled){', pad_bytes(b'if(1||a.a().autoUpdate.dis){', len(b'if(a.a().autoUpdate.disabled){')), True),
             ],
         ),
         (
@@ -360,6 +409,9 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
             [
                 (b'const c=O$i(A);if(c)throw', b'const c=O$i(A);if(0)throw', False),
                 (b'const g=C$i(a.data.provider,a.data.models);if(g)throw', b'const g=C$i(a.data.provider,a.data.models);if(0)throw', False),
+                # 0811: catalog check became `let u=Up(s.data.provider,s.data.models);if(u)throw`.
+                # Bare `if(u)throw` is generic, so anchor on the models() context.
+                (b's.data.models);if(u)throw', b's.data.models);if(0)throw', False),
             ],
         ),
         (
@@ -367,6 +419,13 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
             [
                 (title_0623, pad_bytes(b'.catch(()=>String(d.first_session_message||"").slice(0,46))', len(title_0623)), True),
                 (title_0703, pad_bytes(b'.catch(()=>String(B.first_session_message||"").slice(0,46))', len(title_0703)), True),
+                # 0811: title-gen moved to the entry bundle (index.js); same catch runs
+                # in both the session-model and default-model branches (allow_multi).
+                (
+                    b'.catch(e=>(o.o.warn(`[title-gen] failed`,{error:String(e)}),``))',
+                    pad_bytes(b'.catch(()=>String(t.first_session_message||"").slice(0,46))', len(b'.catch(e=>(o.o.warn(`[title-gen] failed`,{error:String(e)}),``))')),
+                    True,
+                ),
             ],
         ),
         (
@@ -379,18 +438,53 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                     pad_bytes(b'const xxi=new Set(["low","medium","high","max"]),Pxi=new Set(["low","medium","high","max","unset","max"]);', len(b'const xxi=new Set(["low","medium","high","max"]),Pxi=new Set(["low","medium","high","xhigh","max","unset"]);')),
                     False,
                 ),
+                # 0811: no patch needed — the accepted-effort set `C` natively excludes
+                # xhigh and the resolver `T()` falls back to medium for anything else
+                # (index.chunk-DM383TMs.js), so xhigh is never sent to 3P models.
             ],
         ),
     ]
 
 
-def patch_index(content: bytes) -> tuple[bytes, list[dict[str, Any]]]:
-    all_results: list[dict[str, Any]] = []
-    patched = content
-    for label, alternatives in build_index_patch_specs():
-        patched, results = apply_alternatives(patched, label, alternatives)
-        all_results.extend(results)
-    return patched, all_results
+def patch_index_files(files: dict[str, bytes]) -> tuple[dict[str, bytes], list[dict[str, Any]]]:
+    """Apply index-build patch specs across all `.vite/build/index*.js` files.
+
+    Since 0811 the main bundle is code-split into many `index.chunk-*.js` /
+    `index2.chunk-*.js` files plus the preload, so a given layer may match in
+    more than one file (e.g. the same model validator is bundled in both a
+    renderer chunk and the preload). Every matching file is patched. Results
+    are aggregated per label: concrete hits (applied / already_applied /
+    ambiguous) are reported with their file; layers that matched nowhere report
+    a single missing entry.
+    """
+    working = dict(files)
+    by_label: dict[str, list[dict[str, Any]]] = {}
+    for fpath in sorted(working):
+        content = working[fpath]
+        for label, alternatives in build_index_patch_specs():
+            patched, results = apply_alternatives(content, label, alternatives)
+            if patched != content:
+                working[fpath] = patched
+                content = patched
+            by_label.setdefault(label, []).extend({**r, "file": fpath} for r in results)
+
+    final: list[dict[str, Any]] = []
+    for label, results in by_label.items():
+        concrete = [r for r in results if r["status"] in {"applied", "already_applied", "ambiguous"}]
+        if concrete:
+            final.extend(concrete)
+        else:
+            final.append(
+                {
+                    "label": label,
+                    "status": "missing",
+                    "matches": 0,
+                    "already_matches": 0,
+                    "offsets": [],
+                    "file": f"{ASAR_INDEX_PREFIX}*.js (none matched)",
+                }
+            )
+    return working, final
 
 
 def patch_swift(content: bytes) -> tuple[bytes, list[dict[str, Any]]]:
@@ -409,17 +503,44 @@ def patch_asar(app: Path, *, dry_run: bool = False) -> dict[str, Any]:
     report: dict[str, Any] = {"path": str(asar), "sha256_before": before_sha, "files": [], "patches": []}
 
     modified = False
-    for target, patcher in [(ASAR_INDEX, patch_index), (ASAR_SWIFT, patch_swift)]:
-        try:
+
+    # Index layer: scan every `.vite/build/index*.js` file (0811+ code-splitting).
+    index_files = find_index_build_files(header)
+    if not index_files:
+        report["files"].append({"path": ASAR_INDEX, "status": "missing"})
+    else:
+        entries: dict[str, tuple[int, int, dict[str, Any]]] = {}
+        contents: dict[str, bytes] = {}
+        for target in index_files:
             entry = get_asar_file_entry(header, target)
-        except KeyError:
-            report["files"].append({"path": target, "status": "missing"})
-            continue
+            start = 8 + header_size + int(entry["offset"])
+            size = int(entry["size"])
+            entries[target] = (start, size, entry)
+            contents[target] = bytes(data[start : start + size])
+        patched_files, patch_results = patch_index_files(contents)
+        for target in sorted(patched_files):
+            start, size, entry = entries[target]
+            patched_content = patched_files[target]
+            file_modified = patched_content != contents[target]
+            modified = modified or file_modified
+            report["files"].append({"path": target, "status": "modified" if file_modified else "unchanged", "size": size})
+            if file_modified and not dry_run:
+                data[start : start + size] = patched_content
+                entry["integrity"] = calculate_file_integrity(patched_content)
+        report["patches"].extend(patch_results)
+
+    # Swift layer: single file.
+    target = ASAR_SWIFT
+    try:
+        entry = get_asar_file_entry(header, target)
+    except KeyError:
+        report["files"].append({"path": target, "status": "missing"})
+    else:
         start = 8 + header_size + int(entry["offset"])
         size = int(entry["size"])
         end = start + size
         content = bytes(data[start:end])
-        patched_content, patch_results = patcher(content)
+        patched_content, patch_results = patch_swift(content)
         file_modified = patched_content != content
         modified = modified or file_modified
         report["files"].append({"path": target, "status": "modified" if file_modified else "unchanged", "size": size})
@@ -932,7 +1053,7 @@ def print_report(report: dict[str, Any]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Patch Claude Desktop for 3P/Cowork usage and report feature readiness.")
     parser.add_argument("--app", type=Path, default=APP_DEFAULT, help="Installed Claude.app path")
-    parser.add_argument("--dmg", type=Path, default=None, help="DMG containing Claude.app, e.g. Claude-0703.dmg")
+    parser.add_argument("--dmg", type=Path, default=None, help="DMG containing Claude.app, e.g. Claude-0811.dmg")
     parser.add_argument("--from-dmg", action="store_true", help="Copy Claude.app from --dmg into a temporary workspace before patching")
     parser.add_argument("--workdir", type=Path, default=None, help="Temporary workspace root")
     parser.add_argument("--install", action="store_true", help="Install patched temp app to --app after verification")

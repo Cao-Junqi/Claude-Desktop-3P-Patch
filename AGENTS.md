@@ -21,7 +21,7 @@ patch_claude_3p_v2.py
 - 合并中文汉化能力，并让 App 内语言选择器显示"简体中文"；
 - 默认采用 DMG → 临时 App → patch → 验证 的安全流程，只有显式 `--install` 才替换 `/Applications/Claude.app`。
 
-**当前状态**：脚本与 GitHub `origin/main` 一致（commit `f2c7596`），功能已精简到纯 3P patch + 本地恢复 + 中文汉化，无额外注入。
+**当前状态**：脚本已适配 0811（Claude Desktop `1.26832.0`），功能为纯 3P patch + 本地恢复 + 中文汉化（汉化已扩到 11664 条补全），无额外注入。工作树有未提交改动（0811 适配 + 汉化补全）。
 
 ---
 
@@ -30,8 +30,8 @@ patch_claude_3p_v2.py
 | 项 | 值 |
 |---|---|
 | 系统 | macOS |
-| 主安装包 | `Claude-0703.dmg` |
-| 已验证 Claude Desktop 版本 | `1.18286.0` |
+| 主安装包 | `Claude-0811.dmg` |
+| 已验证 Claude Desktop 版本 | `1.26832.0` |
 | Bundle ID | `com.anthropic.claudefordesktop` |
 | 主脚本 | `patch_claude_3p_v2.py` |
 | 旧基线脚本 | `patch_claude.py` |
@@ -211,6 +211,48 @@ S1=["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt
 - 清理 `README.md` 和 `INSTALL_APPLICATION_PATCH.md`
 
 脚本当前与 GitHub `origin/main` 一致。
+
+---
+
+## 0811 适配记录（2026-08-11）
+
+**版本**：`Claude-0811.dmg` / Claude Desktop `1.26832.0`（安装包从 `Claude-0703.dmg` 更新）。
+
+### 结构性变化：bundle 代码分割
+
+0811 的 `.vite/build/index.js` 从 15MB 缩到 0.23MB（只剩入口），逻辑被拆进约 250 个 `index.chunk-*.js` / `index2.chunk-*.js` + `index.pre.js`（4.4MB）。旧脚本只扫 `index.js`，导致 L1-L7 全部 miss。
+
+**改造**：`patch_claude_3p_v2.py` 新增 `find_index_build_files()`（扫描所有 `index*.js`）+ `patch_index_files()`（跨文件逐层 first-hit/全匹配），`patch_asar()` 改为多文件写回。0703 兼容保留（0703 无 chunk，行为不变）。
+
+### 各层新特征码（0811 已实测命中）
+
+| 层 | 0811 文件 | 新特征码要点 |
+|---|---|---|
+| L1 | `index.chunk-CJysy3jx.js` | `let s=um.safeParse(o);if(!s.success)throw` → 伪造成功 |
+| L2 | CJysy3jx + `index.pre.js` | `de()`/`YB()` 的 `{ok:!1,reason:` → `{ok:!0,reason:` |
+| L2b | — | 0811 无 `.some()` 终端模式，被 L2/L2c validator 吸收 |
+| L2c | CJysy3jx + preload | `me`/`fe`/`pe`/`QB`/`XB`/`ZB` 六个 provider validator 同 L2 手法 |
+| L4 | `index.chunk-D89KYcyB.js` | `if(r.autoUpdate.disabled){`、`if(a.a().autoUpdate.disabled){`(×3, allow_multi) |
+| L5 | CJysy3jx | `s.data.models);if(u)throw` → `if(0)throw` |
+| L6 | `.vite/build/index.js`(入口) | `.catch(e=>(o.o.warn(\`[title-gen] failed\`...` → 兜底 first_session_message |
+| L7 | — | 0811 原生 `C` set 不含 xhigh，解析器 `T()` 兜底 medium，无需 patch |
+| L3b | `claude-swift` | 直接命中（offset 1750→1830） |
+
+**踩坑**：L4 早期写法漏了 if 条件右括号 `)`（`dis{` 而非 `dis){`）导致启动 SyntaxError；已修复为保留 `){`。
+
+### 汉化补全（2026-08-11）
+
+`resources/frontend-zh-CN.json` 从 12355 → 24019 key（en-US 全集 20721 全覆盖）。
+
+- 缺译的 11664 条全部机翻补齐（24 批，批量工具在 `/tmp/zh_batches/`）。
+- 重打补丁后：**20436 translated, 0 fallback**（此前 8956 translated / 11664 fallback）。
+- 用户确认**全部保留**（含 AI 提示词与长帮助文本）。
+- 规则：ICU plural/`{占位符}`/`<标签>` 保留；专有名词（Claude/MCP/模型名等）留英文。
+- ⚠️ 注意：官方 Anthropic 中文包本就只覆盖 44%（9057/20721），本补全超出官方范围，属本项目自定义增强。
+
+### TCC 注意事项
+
+在 /tmp 启动解包后的 Claude 临时 App 会触发 macOS TCC 重新评估，**撤销终端对 ~/Documents 的访问**（表现为项目文件 EPERM）。工作流务必：**先完成所有文件操作，最后再启动临时 App**。
 
 ---
 
