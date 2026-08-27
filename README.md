@@ -11,10 +11,12 @@ patch_claude_3p_v2.py
 当前主适配目标：
 
 ```text
-Claude-0703.dmg / Claude Desktop 1.18286.0
+Claude-0811.dmg / Claude Desktop 1.26832.0
 ```
 
-已完成验证：dry-run、临时 App patch、中文汉化、重签名、`codesign`、直接启动临时 App。
+已完成验证：dry-run、临时 App patch、中文汉化（24019 key 全覆盖）、重签名、`codesign`、临时 App + 正式安装启动实测。
+
+> 变更历史见 [CHANGELOG.md](CHANGELOG.md)，操作流程见 [SOP.md](SOP.md)。
 
 ---
 
@@ -155,11 +157,12 @@ Contents/Resources/ion-dist/assets/v1/c4b350ac1-BTR_0NaM.js
 
 | 文件 | 说明 |
 |---|---|
-| `patch_claude_3p_v2.py` | 当前推荐主脚本，支持 0703、3P patch、本地功能恢复、中文汉化、签名验证 |
+| `patch_claude_3p_v2.py` | 当前推荐主脚本，支持 0811（bundle 多文件扫描）、3P patch、本地功能恢复、中文汉化、签名验证 |
 | `patch_claude.py` | 旧版 0604/0623 基线脚本，保留作参考 |
 | `patch_claude_zh_cn.py` | 独立中文汉化脚本，新版主脚本会复用其中的汉化逻辑 |
-| `resources/` | 中文汉化资源目录 |
-| `Claude-0703.dmg` | 0703 安装包，推荐从此 DMG 复制临时 App 后 patch |
+| `resources/` | 中文汉化资源目录（frontend-zh-CN.json 24019 key） |
+| `translations/` | 汉化翻译管线（批次文件 + 校验/合并工具） |
+| `Claude-0811.dmg` | 0811 安装包，推荐从此 DMG 复制临时 App 后 patch |
 | `AGENTS.md` | 开发/维护记录，包含关键变量、patch 层、验证状态和后续维护提示 |
 
 ---
@@ -173,7 +176,7 @@ Contents/Resources/ion-dist/assets/v1/c4b350ac1-BTR_0NaM.js
 ```bash
 python3 patch_claude_3p_v2.py \
   --from-dmg \
-  --dmg Claude-0703.dmg \
+  --dmg Claude-0811.dmg \
   --dry-run \
   --provider gateway \
   --feature-recovery \
@@ -187,7 +190,7 @@ python3 patch_claude_3p_v2.py \
 ```bash
 python3 patch_claude_3p_v2.py \
   --from-dmg \
-  --dmg Claude-0703.dmg \
+  --dmg Claude-0811.dmg \
   --provider gateway \
   --feature-recovery \
   --zh-cn \
@@ -204,7 +207,7 @@ python3 patch_claude_3p_v2.py \
 ```bash
 sudo python3 patch_claude_3p_v2.py \
   --from-dmg \
-  --dmg Claude-0703.dmg \
+  --dmg Claude-0811.dmg \
   --provider gateway \
   --feature-recovery \
   --zh-cn \
@@ -250,7 +253,7 @@ python3 patch_claude_3p_v2.py \
 | 参数 | 说明 |
 |---|---|
 | `--from-dmg` | 从 DMG 复制 Claude.app 到临时目录后 patch |
-| `--dmg <path>` | 指定 DMG，默认可用 `Claude-0703.dmg` |
+| `--dmg <path>` | 指定 DMG，默认可用 `Claude-0811.dmg` |
 | `--app <path>` | 指定已安装的 Claude.app，默认 `/Applications/Claude.app` |
 | `--dry-run` | 只检查 patch 命中情况，不写入 App |
 | `--install` | 把 patch 后的临时 App 安装到 `--app` |
@@ -284,7 +287,7 @@ python3 -m py_compile patch_claude.py patch_claude_3p_v2.py patch_claude_zh_cn.p
 ```bash
 python3 patch_claude_3p_v2.py \
   --from-dmg \
-  --dmg Claude-0703.dmg \
+  --dmg Claude-0811.dmg \
   --dry-run \
   --provider gateway \
   --feature-recovery \
@@ -302,7 +305,7 @@ python3 patch_claude_3p_v2.py \
 ```bash
 python3 patch_claude_3p_v2.py \
   --from-dmg \
-  --dmg Claude-0703.dmg \
+  --dmg Claude-0811.dmg \
   --provider gateway \
   --feature-recovery \
   --zh-cn \
@@ -341,52 +344,7 @@ S1=["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt
 
 ## 更新日志
 
-### 2026-07-03 — 0703 语言白名单修复
-
-- 修复 0703 App 内语言选择器不显示"简体中文"的问题；
-- 在 `patch_claude_3p_v2.py` 的 `apply_localization()` 中加入 fallback 扫描逻辑；
-- 旧逻辑失败后扫描 `Contents/Resources/ion-dist/assets/v1/*.js`；
-- 当前验证命中文件：`c4b350ac1-BTR_0NaM.js`；
-- 已验证 `zh-CN` 被写入语言白名单，中文资源文件存在，临时 App 可启动。
-
-### 2026-07-03 — FrA gateway validator 语法修复
-
-- 修复 0703 `FrA` gateway validator patch 生成非法 JS 的问题；
-- 旧错误形态：`return 1!==0?{ok:!0};` 缺少三元表达式 `:` 分支；
-- 新 patch 改为合法且等长的 `if(1)return{ok:!0};` 加空格 padding；
-- 已通过 `node --check` 与临时 App 启动验证。
-
-### 2026-07-03 — feature-recovery 增强
-
-- 新增 `--feature-recovery`；
-- 新增 `--enable-local-code-features`；
-- 新增 `--local-market-report`；
-- 新增 `--zh-cn` / `--lang`；
-- 合并中文汉化流程；
-- 加强 session title fallback；
-- 新增本地 skills/plugins/extensions 扫描报告；
-- 调整临时 App patch 时的本地偏好写入逻辑，避免未安装时改用户配置。
-
-### 2026-07-03 — 0703 v2 安全工作流
-
-- 新增 `patch_claude_3p_v2.py`；
-- 支持从 `Claude-0703.dmg` 复制临时 App 后 patch；
-- 默认不覆盖 `/Applications/Claude.app`；
-- 适配 Claude Desktop `1.18286.0`；
-- 新增 0703 特征码；
-- 自动更新 patch 改为 `if(1||...)` 强制早期返回；
-- 新增 policy / provider capability report；
-- 支持 JSON 报告；
-- 支持重签名和 `codesign` 验证。
-
-### 2026-06-23 — 0623 基线适配
-
-- 适配 0623 版本；
-- 解除模型下拉框过滤；
-- 增加 gateway validator 绕过；
-- 增加 session title fallback；
-- 兼容 3P 模型 effort；
-- 保留为 `patch_claude.py` 旧版基线。
+变更历史已独立成 [CHANGELOG.md](CHANGELOG.md)（日期-主题，最新在上）。本文件不再内嵌重复内容。
 
 ---
 

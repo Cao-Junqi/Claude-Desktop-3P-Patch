@@ -1,9 +1,21 @@
 # HANDOFF — Claude-Desktop-3P-Patch 交接文档
 
 > 用途：给后续 agent / 开发者接手本项目的**历史处理记录 + 记录存放索引**。
-> 技术细节（patch 层、常量、函数）看 [AGENTS.md](AGENTS.md)；本文件回答"这个项目做过什么、记录在哪、下一步该干嘛"。
+> 技术细节（patch 层、常量、函数）看 [AGENTS.md](AGENTS.md)；操作流程看 [SOP.md](SOP.md)；变更历史看 [CHANGELOG.md](CHANGELOG.md)。
+> 本文件回答"这个项目做过什么、记录在哪、下一步该干嘛"。
 >
-> 最后更新：2026-08-11（Claude-0811.dmg 待处理时点）
+> 最后更新：2026-08-11（0811 适配 + 汉化补全完成，已提交 GitHub 后时点）
+
+---
+
+## 0. 文档地图
+
+| 文档 | 何时读 |
+|---|---|
+| [SOP.md](SOP.md) | 要做**任何操作**（安装/升级/适配新版）前 —— 含脚本更新流程 |
+| [AGENTS.md](AGENTS.md) | 要改 patch 层 / 常量 / 查近况 |
+| [CHANGELOG.md](CHANGELOG.md) | 要改 README 版本号 / 写发布说明前 |
+| [INSTALL_APPLICATION_PATCH.md](INSTALL_APPLICATION_PATCH.md) | 只装已下载版本、打补丁 |
 
 ---
 
@@ -13,9 +25,10 @@ macOS Claude Desktop 的本地补丁脚本，把 3P / Gateway 模式下的模型
 
 - 主脚本：`patch_claude_3p_v2.py`
 - 旧基线：`patch_claude.py`（v6 时代，已被 v2 取代）
-- 汉化辅助：`patch_claude_zh_cn.py` + `resources/`
+- 汉化辅助：`patch_claude_zh_cn.py` + `resources/`（frontend-zh-CN.json 24019 key）
+- 翻译管线：`translations/`（批次文件 + `check_and_merge.py`）
 - 默认安全流程：`DMG → 临时 App → patch → 验证`，只有显式 `--install` 才替换 `/Applications/Claude.app`
-- 当前 /Applications 版本：`1.18286.0`（0703 构建，2026-07-04 打过补丁）
+- 当前适配版本：`1.26832.0`（0811 构建，已 patch 并提交）
 
 ---
 
@@ -100,18 +113,17 @@ SkillHub 是一次失败的注入实验（面板有全局显示 bug，且依赖�
 
 ## 4. 当前状态与待办（截至 2026-08-11）
 
-### 0811 适配（已完成）
+### 0811 适配（已完成并发布）
 
-- **Claude-0811.dmg / 1.26832.0 已适配**：脚本改为多文件扫描（bundle 代码分割），L1-L7 全部重新命中，L3b 直接命中。详见 AGENTS.md「0811 适配记录」。
-- 临时 App 实测：patch 后启动成功、稳定运行。待用户最终目视确认。
-- **汉化补全**：`frontend-zh-CN.json` 12355 → 24019 key，机翻补齐 11664 条缺译（用户确认全部保留）。重打补丁后 **20436 translated, 0 fallback**。
+- **Claude-0811.dmg / 1.26832.0 已适配**：脚本改为多文件扫描（bundle 代码分割），L1-L7 全部重新命中，L3b 直接命中。详见 AGENTS.md「0811 适配记录」+ CHANGELOG.md。
+- 临时 App + 正式安装均实测通过，用户确认正常。
+- **汉化补全**：`frontend-zh-CN.json` 12355 → 24019 key，机翻补齐 11664 条缺译。重打补丁后 **20436 translated, 0 fallback**。
+- **已提交 GitHub**：`5ec82c7`（适配+汉化）、`b23aa9e`（翻译管线入库），本地与 `origin/main` 一致。
 
-### 待办
+### 待办 / 观察项
 
-1. **目视验证 0811 汉化覆盖**：启动临时 App 确认界面中文（启动前先做完所有文件操作——启动 /tmp 临时 App 会触发 macOS TCC 撤销 ~/Documents 访问，见 AGENTS.md「TCC 注意事项」）。
-2. **代码提交**：`patch_claude_3p_v2.py`、`AGENTS.md`、`HANDOFF.md`、`resources/frontend-zh-CN.json` 有未提交改动；`resources/` 现仍被 TCC 锁（2026-08-11 启动临时 App 后触发），需重启会话后提交。
-3. **userscripts/ 未纳入 git**：`agent-reach-cookie-helper.user.js`（v4）是 git 未跟踪文件。决定是否入库 + 补文档。
-4. **批量翻译工具**在 `/tmp/zh_batches/`（check_and_merge.py 等），如需复跑/复现可从那里取。
+1. **userscripts/ 未纳入 git**：`agent-reach-cookie-helper.user.js`（v4）是 git 未跟踪的小工具（cookie helper，与本项目无关）。决定是否入库或移除。
+2. **下次新版适配**：按 [SOP.md](SOP.md)「流程 2：脚本更新流程」执行即可，无需重新摸索。
 
 ---
 

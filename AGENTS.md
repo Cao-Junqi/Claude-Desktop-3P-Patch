@@ -2,6 +2,19 @@
 
 本文件用于记录 Claude Desktop 3P Patcher 项目的关键变量、维护状态、patch 层含义和近期工作情况，方便后续 agent / 开发者继续维护。
 
+## 文档索引
+
+| 文档 | 用途 |
+|---|---|
+| [AGENTS.md](AGENTS.md) | 本文件。维护状态、patch 层、常量、近期修复 |
+| [SOP.md](SOP.md) | 标准操作流程，含**脚本更新流程**（官网下载→自动更新脚本→AI+人工验证→更新文档→提交） |
+| [HANDOFF.md](HANDOFF.md) | 历史处理记录 + 记录存放索引 + 常见坑 |
+| [CHANGELOG.md](CHANGELOG.md) | 变更日志（日期-主题，最新在上） |
+| [README.md](README.md) | 面向用户的使用说明 |
+| [INSTALL_APPLICATION_PATCH.md](INSTALL_APPLICATION_PATCH.md) | 已安装 App 的打补丁命令 |
+
+> **新版本适配时**：优先读 [SOP.md](SOP.md) 的「流程 2：脚本更新流程」，它把 dry-run → 提取 bundle → grep 新特征码 → 更新 `build_index_patch_specs()` → 验证 → 发布 串成了可复现步骤。
+
 ---
 
 ## 项目目标
@@ -21,7 +34,7 @@ patch_claude_3p_v2.py
 - 合并中文汉化能力，并让 App 内语言选择器显示"简体中文"；
 - 默认采用 DMG → 临时 App → patch → 验证 的安全流程，只有显式 `--install` 才替换 `/Applications/Claude.app`。
 
-**当前状态**：脚本已适配 0811（Claude Desktop `1.26832.0`），功能为纯 3P patch + 本地恢复 + 中文汉化（汉化已扩到 11664 条补全），无额外注入。工作树有未提交改动（0811 适配 + 汉化补全）。
+**当前状态**：脚本已适配 0811（Claude Desktop `1.26832.0`），功能为纯 3P patch + 本地恢复 + 中文汉化（汉化已扩到 11664 条补全），无额外注入。已提交至 GitHub `origin/main`（commit `b23aa9e`）。
 
 ---
 
