@@ -2,13 +2,22 @@
 
 Claude Desktop 第三方模型解锁 + 中文汉化工具
 
-**当前适配版本**: Claude Desktop 0811 (1.26832.0)  
+**当前适配版本**: Claude Desktop 0903 (1.44121.4)  
 **汉化翻译**: 自研，24000+ 条专业翻译（2026-08-11 完成）  
 **最后更新**: 2026-09-03
 
 ---
 
 ## 📋 更新日志
+
+### 2026-09-03 - 适配 Claude Desktop 0903 + 汉化脚本更新
+- ✅ 更新 macOS 3P patch 脚本支持 0903 (1.44121.4)
+- ✅ 更新 macOS 汉化脚本适配 0903 新机制
+- ✅ L1 层更新：safeParse 模式适配变量名变化
+- ✅ L5 层移除：该验证机制已不存在
+- ✅ L2/L4/L6 层保持稳定
+- ✅ 汉化文件改为双位置：ion-dist/i18n/ + Resources/i18n/
+- ✅ 完成 dry-run 测试
 
 ### 2026-09-03 - 项目重构
 - ✅ 按平台分离目录结构（macOS / Windows）
@@ -41,8 +50,10 @@ Claude Desktop 第三方模型解锁 + 中文汉化工具
 Claude-Desktop-3P-Patch/
 │
 ├── macOS/                                    🍎 macOS 平台
-│   ├── patch_claude_3p_macos_0811.py       第三方模型 patch
-│   ├── patch_claude_zhcn_macos.py          中文汉化脚本
+│   ├── patch_claude_3p_macos_0903.py       第三方模型 patch (0903 最新)
+│   ├── patch_claude_zhcn_macos_0903.py     中文汉化脚本 (0903 最新)
+│   ├── patch_claude_3p_macos_0811.py       第三方模型 patch (0811 旧版)
+│   ├── patch_claude_zhcn_macos.py          中文汉化脚本 (0811 旧版)
 │   ├── resources/                           汉化资源文件
 │   └── README.md                            macOS 使用说明
 │
@@ -74,11 +85,11 @@ Claude-Desktop-3P-Patch/
 # 进入 macOS 目录
 cd macOS
 
-# 第三方模型 patch
-sudo python3 patch_claude_3p_macos_0811.py
+# 第三方模型 patch（0903 最新版本）
+sudo python3 patch_claude_3p_macos_0903.py
 
-# 中文汉化（可选）
-sudo python3 patch_claude_zhcn_macos.py --user-home "$HOME"
+# 中文汉化（可选，0903 最新版本）
+sudo python3 patch_claude_zhcn_macos_0903.py --user-home "$HOME"
 ```
 
 详见 [macOS/README.md](macOS/README.md)
