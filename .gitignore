@@ -1,3 +1,25 @@
-AGENTS.md
-*.dmg
+# 忽略大文件
+Windows-Delivery-Package/Claude-Setup-x64.exe
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.spec
+
+# OS
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

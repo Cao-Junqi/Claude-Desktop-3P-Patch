@@ -199,40 +199,107 @@ def patch_exact(content: bytes, original: bytes, replacement: bytes, label: str,
 
 
 def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]]]:
-    """Same patch specs as macOS version."""
-    title_0623 = b'.catch(()=>String(p.first_session_message||"").slice(0,46))'
-    title_0703 = b'.catch(()=>String(B.first_session_message||"").slice(0,46))'
-
+    """Synced with macOS version - updated 2026-09-03."""
+    title_0623 = b'.catch(Q=>(D.warn("[title-gen] failed",{error:String(Q)}),""))'
+    title_0703 = b'.catch(f=>(D.warn("[title-gen] failed",{error:String(f)}),""))'
     return [
         (
-            "L1 managed config safeParse bypass",
+            "L1 3P managed config safeParse bypass",
             [
-                (b'const A=n(K);if(!A.success)throw', b'const A=n(K);if(0&&!A.success)throw', False),
-                (b'const I=z.safeParse(s);if(!I.success)throw', b'const I=z.safeParse(s);if(0&&!I.success)throw', False),
-                (b'const E=tSt.safeParse(s);if(!E.success)throw', b'const E=tSt.safeParse(s);if(0&&!E.success)throw', False),
+                (b'const a=b$i.safeParse(s);', b'var a={data:s,success:1};', False),
+                (b'const l=Ewi.safeParse(E);', b'var l={data:E,success:1};', False),
+                (b'const s=jci.safeParse(o);', b'var s={data:o,success:1};', False),
+                # 0811: safeParse + throw guard in one range; fake success + dead guard.
+                (
+                    b'let s=um.safeParse(o);if(!s.success)throw',
+                    pad_bytes(b'let s={data:o,success:1};if(0)throw', len(b'let s=um.safeParse(o);if(!s.success)throw')),
+                    False,
+                ),
             ],
         ),
         (
-            "L2 model white-list bypass",
+            "L2 model picker empty allowlist bypass",
             [
-                (b"if(A.managed_config){const h=A.managed_config.models??[];if(h.length===0)throw", b"if(A.managed_config){const h=A.managed_config.models??[];if(h.length<=-1)throw", False),
-                (b"if(I.managed_config){const f=I.managed_config.models??[];if(f.length===0)throw", b"if(I.managed_config){const f=I.managed_config.models??[];if(f.length<=-1)throw", False),
-                (b"if(E.managed_config){const o=E.managed_config.models??[];if(o.length===0)throw", b"if(E.managed_config){const o=E.managed_config.models??[];if(o.length<=-1)throw", False),
+                (b'if(A.startsWith("claude-"))return!0;if(e.length===0)return!1;', b'if(A.startsWith("claude-"))return!0;if(e.length===0)return!0;', False),
+                (b'if(e.startsWith("claude-"))return!0;if(A.length===0)return!1;', b'if(e.startsWith("claude-"))return!0;if(A.length===0)return!0;', False),
+                # 0811: the claude- allowlist became a model-ID validator (Vertex).
+                # de lives in a renderer chunk, YB in the preload; both are patched.
+                (b'de(e){return e.toLowerCase().startsWith(`claude-`)?{ok:!0}:{ok:!1,reason:', b'de(e){return e.toLowerCase().startsWith(`claude-`)?{ok:!0}:{ok:!0,reason:', False),
+                (b'YB(e){return e.toLowerCase().startsWith(`claude-`)?{ok:!0}:{ok:!1,reason:', b'YB(e){return e.toLowerCase().startsWith(`claude-`)?{ok:!0}:{ok:!0,reason:', False),
+                # 137937: ES() in index.pre.js is the shared gate inside the four
+                # model-ID validators (kS/AS/jS call it). The blacklist regex TS
+                # killed 3P names (minimax/glm/deepseek/...). Pinning t to a
+                # whitelisted string makes ES always-true, which both unblocks
+                # the validators (L2/L2c) and neutralizes the TS blacklist.
+                (
+                    b'function ES(e){let t=e.toLowerCase();return TS.test(t)?!1:CS.test(t)||wS.some((e=>t.includes(e)))}',
+                    b'function ES(e){let t=`claude`,____=e;return TS.test(t)?!1:CS.test(t)||wS.some((e=>t.includes(e)))}',
+                    False,
+                ),
+            ],
+        ),
+        (
+            "L2b model picker terminal some() bypass",
+            [
+                (b'return e.some(i=>i===A||$d(i)===t)}', b'return e.some(i=>!0);/*padpadpad*/}', False),
+                (b'return e.some(r=>r===A||qB(r)===t)}', b'return e.some(r=>!0);/*padpadpad*/}', False),
+                # 0811: the terminal some() allowlist is gone; model visibility is now
+                # gated by the {ok:!1,reason:} validators handled in L2/L2c, so no new
+                # signature here.
             ],
         ),
         (
             "L2c gateway model route validator bypass",
             [
-                (b'const c=O$i(A);if(c)throw', b'const c=O$i(A);if(0)throw', False),
-                (b'const g=C$i(a.data.provider,a.data.models);if(g)throw', b'const g=C$i(a.data.provider,a.data.models);if(0)throw', False),
-                (b's.data.models);if(u)throw', b's.data.models);if(0)throw', False),
+                (b'function v4i(A){return PX(A)?{ok:!0}', b'function v4i(A){return 1!==0?{ok:!0}', False),
+                (b'function Tni(A){return UrA(A)?{ok:!0}', b'function Tni(A){return 1!==0 ?{ok:!0}', False),
+                (
+                    b'function FrA(A,e){if(A===void 0)return{ok:!0};',
+                    pad_bytes(b'function FrA(A,e){if(1)return{ok:!0};', len(b'function FrA(A,e){if(A===void 0)return{ok:!0};')),
+                    False,
+                ),
+                # 0811: model route validators per provider return {ok:!1,reason:} for
+                # non-Anthropic IDs; flip each to {ok:!0} so gateway/3P models pass.
+                # Chunk names: me=gateway, fe=Foundry, pe=Anthropic; preload copies: QB/XB/ZB.
+                (b'function me(e){return ce(e)?{ok:!0}:{ok:!1,reason:', b'function me(e){return ce(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function fe(e){return ce(e)?{ok:!0}:{ok:!1,reason:', b'function fe(e){return ce(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function pe(e){return ce(e)?{ok:!0}:{ok:!1,reason:', b'function pe(e){return ce(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function QB(e){return qB(e)?{ok:!0}:{ok:!1,reason:', b'function QB(e){return qB(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function XB(e){return qB(e)?{ok:!0}:{ok:!1,reason:', b'function XB(e){return qB(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function ZB(e){return qB(e)?{ok:!0}:{ok:!1,reason:', b'function ZB(e){return qB(e)?{ok:!0}:{ok:!0,reason:', False),
             ],
         ),
         (
             "L4 force auto-update early return",
             [
-                (b'this.log("Auto-updates disabled by managed config"),!0', b'this.log("Auto-updates disabled by managed config"),!1', False),
-                (b'this.log("Auto-updates disabled",{reason:"managedConfig"}),!0', b'this.log("Auto-updates disabled",{reason:"managedConfig"}),!1', False),
+                (
+                    b'if(A.disableAutoUpdates){D.info("[updater] Auto-updates disabled by enterprise policy"),Ye("desktop_update_disabled",{reason:"enterprise_policy"});return}',
+                    b'if(1||A.disableAutoUpda){D.info("[updater] Auto-updates disabled by enterprise policy"),Ye("desktop_update_disabled",{reason:"enterprise_policy"});return}',
+                    False,
+                ),
+                (
+                    b'if(fi().disableAutoUpdates){D.info("[updater] Auto-updates disabled by enterprise policy");return}',
+                    b'if(1||fi().disableAutoUpda){D.info("[updater] Auto-updates disabled by enterprise policy");return}',
+                    False,
+                ),
+                (
+                    b'if(A.autoUpdate.disabled){',
+                    pad_bytes(b'if(1||A.autoUpdate.dis){', len(b'if(A.autoUpdate.disabled){')),
+                    False,
+                ),
+                (
+                    b'if(cr().autoUpdate.disabled){',
+                    pad_bytes(b'if(1||cr().autoUpdate.dis){', len(b'if(cr().autoUpdate.disabled){')),
+                    False,
+                ),
+                (b'if(e.disableAutoUpdates)', pad_bytes(b'if(1||e.disableAutoU)', len(b'if(e.disableAutoUpdates)')), False),
+                (b'if(ki().disableAutoUpdates)', pad_bytes(b'if(1||ki().disableAutoU)', len(b'if(ki().disableAutoUpdates)')), False),
+                (b'if(r.autoUpdate.disabled){', pad_bytes(b'if(1||r.autoUpdate.dis){', len(b'if(r.autoUpdate.disabled){')), False),
+                (b'if(a.a().autoUpdate.disabled){', pad_bytes(b'if(1||a.a().autoUpdate.dis){', len(b'if(a.a().autoUpdate.disabled){')), True),
+                # 137937: updater entry moved to index.chunk-9HkvRynM.js. Four guards,
+                # two receiver shapes (n / W()); same disabled->dis equal-length trick.
+                (b'if(n.autoUpdate.disabled){', pad_bytes(b'if(1||n.autoUpdate.dis){', len(b'if(n.autoUpdate.disabled){')), False),
+                (b'if(W().autoUpdate.disabled){', pad_bytes(b'if(1||W().autoUpdate.dis){', len(b'if(W().autoUpdate.disabled){')), True),
             ],
         ),
         (
@@ -240,6 +307,8 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
             [
                 (b'const c=O$i(A);if(c)throw', b'const c=O$i(A);if(0)throw', False),
                 (b'const g=C$i(a.data.provider,a.data.models);if(g)throw', b'const g=C$i(a.data.provider,a.data.models);if(0)throw', False),
+                # 0811: catalog check became `let u=Up(s.data.provider,s.data.models);if(u)throw`.
+                # Bare `if(u)throw` is generic, so anchor on the models() context.
                 (b's.data.models);if(u)throw', b's.data.models);if(0)throw', False),
             ],
         ),
@@ -248,15 +317,44 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
             [
                 (title_0623, pad_bytes(b'.catch(()=>String(d.first_session_message||"").slice(0,46))', len(title_0623)), True),
                 (title_0703, pad_bytes(b'.catch(()=>String(B.first_session_message||"").slice(0,46))', len(title_0703)), True),
+                # 0811: title-gen moved to the entry bundle (index.js); same catch runs
+                # in both the session-model and default-model branches (allow_multi).
                 (
                     b'.catch(e=>(o.o.warn(`[title-gen] failed`,{error:String(e)}),``))',
                     pad_bytes(b'.catch(()=>String(t.first_session_message||"").slice(0,46))', 64),
                     True,
                 ),
+                # 137937: /dust/generate_session_title & /dust/generate_title_and_branch
+                # routes in index.chunk-9HkvRynM.js share this catch (allow_multi).
                 (
                     b'.catch((e=>(P.warn(`[title-gen] failed`,{error:String(e)}),``)))',
                     pad_bytes(b'.catch(()=>String(t.first_session_message||"").slice(0,46))', 64),
                     True,
+                ),
+            ],
+        ),
+        (
+            "L7 effort xhigh compatibility",
+            [
+                (b'function qUA(A){return A!=null&&wQr.has(A)?A:void 0}', b'function qUA(A){return A!=null&&mQr.has(A)?A:void 0}', False),
+                # 0703 moved this logic into config-derived effort sets. Keep xhigh out of generic/default options.
+                (
+                    b'const xxi=new Set(["low","medium","high","max"]),Pxi=new Set(["low","medium","high","xhigh","max","unset"]);',
+                    pad_bytes(b'const xxi=new Set(["low","medium","high","max"]),Pxi=new Set(["low","medium","high","max","unset","max"]);', len(b'const xxi=new Set(["low","medium","high","max"]),Pxi=new Set(["low","medium","high","xhigh","max","unset"]);')),
+                    False,
+                ),
+                # 0811: no patch needed — the accepted-effort set `C` natively excludes
+                # xhigh and the resolver `T()` falls back to medium for anything else
+                # (index.chunk-DM383TMs.js), so xhigh is never sent to 3P models.
+            ],
+        ),
+        (
+            "L3b claude-swift virtualization support",
+            [
+                (
+                    b'this.vm.isVirtualizationSupported=async()=>{',
+                    b'this.vm.isVirtualizationSupported=()=>"supported";void async()=>{',
+                    False,
                 ),
             ],
         ),
@@ -317,7 +415,17 @@ def patch_asar(
     patched_files, patch_reports = patch_index_files(index_files)
     report["patches"].extend(patch_reports)
 
-    # Skip claude-swift patch - causes length mismatch error on Windows
+    # Extract and patch claude-swift
+    swift_files = extract_asar_files(header, data, base, ASAR_SWIFT)
+    if ASAR_SWIFT in swift_files:
+        swift_patched, swift_report = patch_exact(
+            swift_files[ASAR_SWIFT],
+            b'this.vm.isVirtualizationSupported=async()=>{',
+            b'this.vm.isVirtualizationSupported=()=>"supported";void async()=>{',
+            "L3b claude-swift virtualization support",
+        )
+        patched_files[ASAR_SWIFT] = swift_patched
+        report["patches"].append({**swift_report, "file": ASAR_SWIFT})
 
     if dry_run:
         report["status"] = "would_patch"
