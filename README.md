@@ -17,7 +17,7 @@ Claude-0811.dmg / Claude Desktop 1.26832.0
 
 已完成验证：dry-run、临时 App patch、中文汉化（24019 key 全覆盖）、重签名、`codesign`、临时 App + 正式安装启动实测。
 
-> 变更历史见 [CHANGELOG.md](CHANGELOG.md)，操作流程见 [SOP.md](SOP.md)。
+> 变更历史见 [CHANGELOG.md](CHANGELOG.md)，操作流程见 [SOP.md](SOP.md)，Windows 详细使用见 [WINDOWS_GUIDE.md](WINDOWS_GUIDE.md)。
 
 ---
 
