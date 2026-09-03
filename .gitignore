@@ -1,25 +1,69 @@
-# 忽略大文件
-Windows-Delivery-Package/Claude-Setup-x64.exe
-
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
+*.py[cod]
+*$py.class
 *.so
-*.egg
-*.egg-info/
-dist/
+.Python
 build/
-*.spec
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# OS
-.DS_Store
-Thumbs.db
+# Virtual environments
+venv/
+ENV/
+env/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Backup files
+*.backup
+*.bak
+*.tmp
+Claude.backup-before-*
+
+# Large binaries (不提交安装包到 git)
+*.dmg
+*.exe
+*.msi
+*.pkg
+Claude-*.dmg
+Claude-Setup-*.exe
+
+# Logs
+*.log
+
+# Temporary
+temp/
+tmp/
+
+# Git worktrees
+.claude/worktrees/
+
+# 内部文档（不对外）
+AGENTS.md
+SOP.md
+HANDOFF.md
+SSH_DIAGNOSIS.md
