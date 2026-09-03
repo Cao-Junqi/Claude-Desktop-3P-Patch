@@ -181,7 +181,12 @@ python patch_claude_3p_windows.py --dry-run --write-policy --report-json C:\temp
 
 ```powershell
 # 以管理员身份运行 PowerShell
+
+# 基础版本（仅 3P patch）
 python patch_claude_3p_windows.py --write-policy --report-json C:\temp\claude-patched.json
+
+# 完整版本（3P patch + 中文汉化）
+python patch_claude_3p_windows.py --zh-cn --write-policy --report-json C:\temp\claude-patched.json
 ```
 
 脚本会自动查找以下位置的 Claude 安装：
@@ -196,10 +201,11 @@ python patch_claude_3p_windows.py --app "C:\Custom\Path\To\Claude" --write-polic
 
 ### Windows 版本说明
 
-- **ASAR patch**：与 macOS 完全相同的 patch 逻辑
+- **ASAR patch**：与 macOS 完全相同的 patch 逻辑（7 层全覆盖）
+- **中文汉化**：✅ 已移植（24019 key，与 macOS 版本一致）
 - **代码签名**：Windows Electron 应用不需要重签名
 - **策略管理**：使用注册表 `HKLM\SOFTWARE\Policies\Anthropic\Claude`
-- **中文汉化**：待移植（当前 Windows 版本仅支持 3P patch）
+- **支持语言**：`--zh-cn`（简体中文）、`--lang zh-TW`（繁体-台湾）、`--lang zh-HK`（繁体-香港）
 
 ---
 

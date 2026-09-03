@@ -37,7 +37,12 @@ dir "$env:PROGRAMFILES\Claude\Claude.exe"
 
 ```powershell
 cd C:\Path\To\Claude-Desktop-3P-Patch
+
+# 仅检查 3P patch
 python patch_claude_3p_windows.py --dry-run --write-policy --report-json C:\temp\claude-dryrun.json
+
+# 检查 3P patch + 中文汉化
+python patch_claude_3p_windows.py --dry-run --zh-cn --write-policy --report-json C:\temp\claude-dryrun.json
 ```
 
 输出示例：
@@ -57,7 +62,12 @@ Registry policy: would_write
 
 ```powershell
 cd C:\Path\To\Claude-Desktop-3P-Patch
+
+# 基础版本（仅 3P patch）
 python patch_claude_3p_windows.py --write-policy --report-json C:\temp\claude-patched.json
+
+# 完整版本（3P patch + 中文汉化）
+python patch_claude_3p_windows.py --zh-cn --write-policy --report-json C:\temp\claude-patched.json
 ```
 
 **方法二：使用 `Start-Process` 提权**
@@ -139,9 +149,16 @@ python patch_claude_3p_windows.py --app "C:\Custom\Path\To\Claude" --write-polic
 
 ### Q4: 需要中文汉化怎么办？
 
-**当前状态**：Windows 版本暂不支持中文汉化，仅支持 3P patch 和注册表策略。
+**已支持！** 使用 `--zh-cn` 参数：
 
-**计划**：后续版本将移植 macOS 的汉化逻辑（`resources/frontend-zh-CN.json` + ASAR 资源注入）。
+```powershell
+python patch_claude_3p_windows.py --zh-cn --write-policy
+```
+
+支持的语言：
+- `--zh-cn`：简体中文（24019 key 完整翻译）
+- `--lang zh-TW`：繁体中文（中国台湾）
+- `--lang zh-HK`：繁体中文（中国香港）
 
 ### Q5: Patch 后 Claude 无法启动
 
@@ -181,7 +198,7 @@ Windows 版本与 macOS 版本使用**完全相同**的 patch 逻辑：
 | ASAR patch | ✅ 完全支持 | ✅ 完全支持 |
 | 禁用自动更新 | ✅ defaults write | ✅ 注册表 |
 | 代码签名 | ✅ codesign | ❌ 不需要 |
-| 中文汉化 | ✅ 24019 key | ⏳ 待移植 |
+| 中文汉化 | ✅ 24019 key | ✅ 24019 key |
 | 本地功能恢复 | ✅ 完整支持 | ⏳ 待移植 |
 | DMG 处理 | ✅ hdiutil | ❌ Windows 用 .exe |
 
