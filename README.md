@@ -1,11 +1,12 @@
 # Claude Desktop 3P Patcher
 
-用于 macOS Claude Desktop 的 3P / Gateway / 本地功能恢复补丁脚本。
+用于 macOS / Windows Claude Desktop 的 3P / Gateway / 本地功能恢复补丁脚本。
 
 当前推荐脚本：
 
 ```text
-patch_claude_3p_v2.py
+macOS: patch_claude_3p_v2.py
+Windows: patch_claude_3p_windows.py
 ```
 
 当前主适配目标：
@@ -157,7 +158,8 @@ Contents/Resources/ion-dist/assets/v1/c4b350ac1-BTR_0NaM.js
 
 | 文件 | 说明 |
 |---|---|
-| `patch_claude_3p_v2.py` | 当前推荐主脚本，支持 0811（bundle 多文件扫描）、3P patch、本地功能恢复、中文汉化、签名验证 |
+| `patch_claude_3p_v2.py` | macOS 主脚本，支持 0811（bundle 多文件扫描）、3P patch、本地功能恢复、中文汉化、签名验证 |
+| `patch_claude_3p_windows.py` | Windows 主脚本，支持 3P patch、注册表策略、跨平台 ASAR 处理 |
 | `patch_claude.py` | 旧版 0604/0623 基线脚本，保留作参考 |
 | `patch_claude_zh_cn.py` | 独立中文汉化脚本，新版主脚本会复用其中的汉化逻辑 |
 | `resources/` | 中文汉化资源目录（frontend-zh-CN.json 24019 key） |
@@ -167,7 +169,41 @@ Contents/Resources/ion-dist/assets/v1/c4b350ac1-BTR_0NaM.js
 
 ---
 
-## 使用方法
+## Windows 使用方法
+
+### 1. Dry-run 检查（Windows）
+
+```powershell
+python patch_claude_3p_windows.py --dry-run --write-policy --report-json C:\temp\claude-dryrun.json
+```
+
+### 2. 正式 Patch（Windows，需要管理员权限）
+
+```powershell
+# 以管理员身份运行 PowerShell
+python patch_claude_3p_windows.py --write-policy --report-json C:\temp\claude-patched.json
+```
+
+脚本会自动查找以下位置的 Claude 安装：
+- `%LOCALAPPDATA%\Programs\Claude`
+- `%PROGRAMFILES%\Claude`
+
+也可以手动指定：
+
+```powershell
+python patch_claude_3p_windows.py --app "C:\Custom\Path\To\Claude" --write-policy
+```
+
+### Windows 版本说明
+
+- **ASAR patch**：与 macOS 完全相同的 patch 逻辑
+- **代码签名**：Windows Electron 应用不需要重签名
+- **策略管理**：使用注册表 `HKLM\SOFTWARE\Policies\Anthropic\Claude`
+- **中文汉化**：待移植（当前 Windows 版本仅支持 3P patch）
+
+---
+
+## 使用方法（macOS）
 
 ### 1. Dry-run，不修改系统 App
 

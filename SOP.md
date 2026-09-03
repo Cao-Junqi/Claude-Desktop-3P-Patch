@@ -8,13 +8,40 @@
 
 | # | 流程 | 触发条件 | 产出 | 责任 |
 |---|---|---|---|---|
-| 1 | 首次安装 / 升级 Claude | 手动下载新版 DMG | 已 patch 的 `/Applications/Claude.app` | 用户 |
-| 2 | **脚本更新流程** | 新版 Claude 导致 patch 层失效 | 更新后的 `patch_claude_3p_v2.py` | AI + 人工 |
+| 1 | 首次安装 / 升级 Claude (macOS) | 手动下载新版 DMG | 已 patch 的 `/Applications/Claude.app` | 用户 |
+| 1w | 首次安装 / 升级 Claude (Windows) | 手动下载新版安装包 | 已 patch 的 Claude | 用户 |
+| 2 | **脚本更新流程** | 新版 Claude 导致 patch 层失效 | 更新后的 `patch_claude_3p_v2.py` / `patch_claude_3p_windows.py` | AI + 人工 |
 | 3 | 文档与发布 | 脚本更新完成 | README + CHANGELOG + git 提交 | AI + 人工 |
 
 ---
 
-## 流程 1：安装 / 升级 Claude
+## 流程 1w：安装 / 升级 Claude (Windows)
+
+Windows 用户从 [claude.ai/download](https://claude.ai/download) 下载安装包后，安装并打补丁。
+
+**最小正式命令**（以管理员身份运行 PowerShell）：
+
+```powershell
+cd "C:\Path\To\Claude-Desktop-3P-Patch"
+
+# 1. 关闭正在运行的 Claude
+Stop-Process -Name "Claude" -ErrorAction SilentlyContinue
+
+# 2. 安装新版（运行 .exe 安装程序）
+# 默认安装到 %LOCALAPPDATA%\Programs\Claude 或 %PROGRAMFILES%\Claude
+
+# 3. 打补丁（3P 兼容 + 禁用自动更新）
+python patch_claude_3p_windows.py --write-policy --report-json C:\temp\claude-patched.json
+
+# 可选：指定自定义路径
+python patch_claude_3p_windows.py --app "C:\Custom\Claude" --write-policy
+```
+
+> ⚠️ Windows 版本当前支持：3P patch + 注册表策略。中文汉化待后续移植。
+
+---
+
+## 流程 1：安装 / 升级 Claude (macOS)
 
 用户手动从 [claude.ai/download](https://claude.ai/download) 下载新版 DMG 后，安装并打补丁。详见 [INSTALL_APPLICATION_PATCH.md](INSTALL_APPLICATION_PATCH.md)。
 

@@ -339,6 +339,16 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 # de lives in a renderer chunk, YB in the preload; both are patched.
                 (b'de(e){return e.toLowerCase().startsWith(`claude-`)?{ok:!0}:{ok:!1,reason:', b'de(e){return e.toLowerCase().startsWith(`claude-`)?{ok:!0}:{ok:!0,reason:', False),
                 (b'YB(e){return e.toLowerCase().startsWith(`claude-`)?{ok:!0}:{ok:!1,reason:', b'YB(e){return e.toLowerCase().startsWith(`claude-`)?{ok:!0}:{ok:!0,reason:', False),
+                # 137937: ES() in index.pre.js is the shared gate inside the four
+                # model-ID validators (kS/AS/jS call it). The blacklist regex TS
+                # killed 3P names (minimax/glm/deepseek/...). Pinning t to a
+                # whitelisted string makes ES always-true, which both unblocks
+                # the validators (L2/L2c) and neutralizes the TS blacklist.
+                (
+                    b'function ES(e){let t=e.toLowerCase();return TS.test(t)?!1:CS.test(t)||wS.some((e=>t.includes(e)))}',
+                    b'function ES(e){let t=`claude`,____=e;return TS.test(t)?!1:CS.test(t)||wS.some((e=>t.includes(e)))}',
+                    False,
+                ),
             ],
         ),
         (
@@ -397,11 +407,12 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 ),
                 (b'if(e.disableAutoUpdates)', pad_bytes(b'if(1||e.disableAutoU)', len(b'if(e.disableAutoUpdates)')), False),
                 (b'if(ki().disableAutoUpdates)', pad_bytes(b'if(1||ki().disableAutoU)', len(b'if(ki().disableAutoUpdates)')), False),
-                # 0811 updater entry (index.chunk-D89KYcyB.js). allow_multi for a.a()
-                # since the same guard appears in all three updater entry points.
-                # Note: keep the closing `)` of the if-condition (`disabled){` -> `dis){`).
                 (b'if(r.autoUpdate.disabled){', pad_bytes(b'if(1||r.autoUpdate.dis){', len(b'if(r.autoUpdate.disabled){')), False),
                 (b'if(a.a().autoUpdate.disabled){', pad_bytes(b'if(1||a.a().autoUpdate.dis){', len(b'if(a.a().autoUpdate.disabled){')), True),
+                # 137937: updater entry moved to index.chunk-9HkvRynM.js. Four guards,
+                # two receiver shapes (n / W()); same disabled->dis equal-length trick.
+                (b'if(n.autoUpdate.disabled){', pad_bytes(b'if(1||n.autoUpdate.dis){', len(b'if(n.autoUpdate.disabled){')), False),
+                (b'if(W().autoUpdate.disabled){', pad_bytes(b'if(1||W().autoUpdate.dis){', len(b'if(W().autoUpdate.disabled){')), True),
             ],
         ),
         (
@@ -423,7 +434,14 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 # in both the session-model and default-model branches (allow_multi).
                 (
                     b'.catch(e=>(o.o.warn(`[title-gen] failed`,{error:String(e)}),``))',
-                    pad_bytes(b'.catch(()=>String(t.first_session_message||"").slice(0,46))', len(b'.catch(e=>(o.o.warn(`[title-gen] failed`,{error:String(e)}),``))')),
+                    pad_bytes(b'.catch(()=>String(t.first_session_message||"").slice(0,46))', 64),
+                    True,
+                ),
+                # 137937: /dust/generate_session_title & /dust/generate_title_and_branch
+                # routes in index.chunk-9HkvRynM.js share this catch (allow_multi).
+                (
+                    b'.catch((e=>(P.warn(`[title-gen] failed`,{error:String(e)}),``)))',
+                    pad_bytes(b'.catch(()=>String(t.first_session_message||"").slice(0,46))', 64),
                     True,
                 ),
             ],

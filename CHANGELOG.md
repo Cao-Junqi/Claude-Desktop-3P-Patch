@@ -4,6 +4,32 @@
 
 ---
 
+## 2026-09-03 — Windows 适配 + macOS L6 修复
+
+### Windows 适配
+
+- 新增 `patch_claude_3p_windows.py`：Windows 版本的 3P patch 脚本。
+- 核心功能移植：
+  - ASAR patch 逻辑（与 macOS 完全相同的特征码和 patch 规则）
+  - Windows 路径适配：`resources/app.asar`（vs macOS `Contents/Resources/app.asar`）
+  - 注册表策略：`HKLM\SOFTWARE\Policies\Anthropic\Claude` 禁用自动更新
+  - 跳过代码签名（Windows Electron 应用不需要）
+- 自动查找安装位置：`%LOCALAPPDATA%\Programs\Claude` 或 `%PROGRAMFILES%\Claude`
+- 待移植功能：中文汉化、本地功能恢复（后续版本）
+
+### macOS 修复
+
+- 修复 L6 层 `pad_bytes()` 长度计算错误：原代码在传参时使用了 `len(原字符串)` 包裹导致运行时报错 "non-equal replacement length"。
+- 现已改为直接传入常量 `64`（两处 0811 特征码的实际长度）。
+- 验证通过：dry-run 全层 `already_applied`，语法检查通过。
+
+### 文档
+
+- README 新增 Windows 使用说明。
+- 文件说明表更新，标注 macOS/Windows 脚本分工。
+
+---
+
 ## 2026-08-11 — 适配 0811（1.26832.0）+ 汉化全量补全
 
 ### 0811 适配
