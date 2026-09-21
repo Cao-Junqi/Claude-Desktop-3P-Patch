@@ -111,19 +111,40 @@ SkillHub 是一次失败的注入实验（面板有全局显示 bug，且依赖�
 
 ---
 
-## 4. 当前状态与待办（截至 2026-08-11）
+## 4. 当前状态与待办（截至 2026-09-21）
 
-### 0811 适配（已完成并发布）
+### 2.2553.1 适配（已完成，待提交）
 
-- **Claude-0811.dmg / 1.26832.0 已适配**：脚本改为多文件扫描（bundle 代码分割），L1-L7 全部重新命中，L3b 直接命中。详见 AGENTS.md「0811 适配记录」+ CHANGELOG.md。
-- 临时 App + 正式安装均实测通过，用户确认正常。
-- **汉化补全**：`frontend-zh-CN.json` 12355 → 24019 key，机翻补齐 11664 条缺译。重打补丁后 **20436 translated, 0 fallback**。
-- **已提交 GitHub**：`5ec82c7`（适配+汉化）、`b23aa9e`（翻译管线入库），本地与 `origin/main` 一致。
+- **版本**：`2.2553.1`（构建日 0918），版本号方案由日期型 `1.44121.4` 改为语义型。
+- **本次最重要的发现**：`Contents/Resources/ion-dist/` 在 `app.asar` **之外**，此前所有 patch 层
+  只扫 `.vite/build/`，完全漏掉渲染进程。渲染进程带着**独立的一份**模型校验器（`At`/`wt`）和
+  语言列表（数组 `Am`），这就是用户遇到的两个问题的根因：
+
+  | 症状 | 根因 | 新增层 |
+  |---|---|---|
+  | 报 `Doesn't look like an Anthropic model: 需要一个引用 Anthropic 模型的网关模型路由…` | 只补了主进程 `Yo()`，渲染进程 `At()` 仍是旧的 | **L2d** |
+  | 语言文件装好了但下拉框没有中文 | `Am` 数组里没有 `zh-CN` | **L9** |
+
+- 逐层结果：L1/L2/L2c/L4/L6 更新特征码；L2b/L5/L7 新版原生已处理；L3b 直接命中；
+  新增 L2d/L9。详见 CHANGELOG.md「2026-09-21」。
+- 顺带修掉两个既有 bug：
+  1. `patch_claude_3p_macos_0921.py` 的汉化桥接仍指向已改名的 `patch_claude_zh_cn.py`，
+     导致 `--zh-cn` 直接 `SystemExit`（现已按新名 → 旧名顺序回退查找）。
+  2. `patch_claude_zhcn_macos_0921.py` 误以为「0903 起语言列表改为文件系统扫描」，
+     实际仍需改 JS 数组（现已在两个脚本里都真正拼接语言）。
+- 验证：dry-run 全命中（ASAR 16 处 + renderer 9 处）、`node --check` 全通过、
+  `codesign --verify --deep --strict` 通过、幂等重跑无副作用、临时 App 启动无崩溃。
+  **用户实测确认汉化与 3P 模型拦截均已正常。**
 
 ### 待办 / 观察项
 
-1. **userscripts/ 未纳入 git**：`agent-reach-cookie-helper.user.js`（v4）是 git 未跟踪的小工具（cookie helper，与本项目无关）。决定是否入库或移除。
-2. **下次新版适配**：按 [SOP.md](SOP.md)「流程 2：脚本更新流程」执行即可，无需重新摸索。
+1. **汉化补全（12110 条）**：2.2553 的 `en-US.json` 增至 29442 key（较 0903 新增 6683），
+   当前 24019 条翻译覆盖 17332/29442。补齐流程见 `translations/README.md`，
+   属新增内容而非回归（0903 时缺 6107）。
+2. **Windows 版本未跟进 2.x**：`Windows/patch_claude_3p_windows_0811.py` 仍是 0811 时代，
+   且同样只扫 ASAR。适配时**务必一并检查 Windows 的 renderer 目录**。
+3. **userscripts/ 未纳入 git**：`agent-reach-cookie-helper.user.js`（v4）是 git 未跟踪的小工具（cookie helper，与本项目无关）。决定是否入库或移除。
+4. **下次新版适配**：按 [SOP.md](SOP.md)「流程 2」执行；步骤 4 已补「必须同时扫描 `ion-dist`」。
 
 ---
 

@@ -170,6 +170,28 @@ grep -rl 'xhigh' . | head                            # L7
 - 找唯一前缀避免 ambiguous（如 `function me(e){return ce(e)?{ok:!0}:{ok:!1,reason:` 而非裸 `{ok:!1`）。
 - 若某层在新版已不存在/被原生处理，注释掉并记录「新版不再需要」（0811 的 L2b / L7 即如此）。
 
+#### ⚠️ 必须同时扫描 `ion-dist`（ASAR 之外）
+
+`.vite/build/` 只是**主进程**。渲染进程在 `Contents/Resources/ion-dist/`，**不在 app.asar 内**，
+且带着自己独立的一份模型校验器和语言列表。只扫 `.vite/build/` 会漏掉这两层，症状是：
+
+| 症状 | 漏掉的层 | 位置 |
+|---|---|---|
+| 报 `Doesn't look like an Anthropic model: 需要一个引用 Anthropic 模型的网关模型路由…` | L2d | `ion-dist/assets/v1/*.js` |
+| 语言文件已装好，但 Settings → Language 里没有中文 | L9 | `ion-dist/assets/v1/shared-*.js` |
+
+```bash
+cd "/tmp/claude-new/Claude.app/Contents/Resources/ion-dist"
+grep -rla 'Doesn.t look like an Anthropic' .          # L2d
+grep -rla 'expected a gateway model route' .          # L2d
+grep -rla '\["en-US","de-DE","fr-FR","ko-KR","ja-JP"' .  # L9
+```
+
+**这两个文件带内容哈希**（如 `ce459c687-B4NlOXPM.js`），文件名每个版本都变，
+必须**按内容定位**，脚本里用 `find_renderer_files()` 而非硬编码文件名。
+由于它们在 ASAR 外，等长替换不是硬性要求（无 ASAR layout 约束），但保持等长更安全；
+`resign_app()` 遍历 `Contents/` 全树，会自动重签这些散文件。
+
 ### 步骤 5 · 更新 `build_index_patch_specs()`
 
 在 `patch_claude_3p_v2.py` 的 `build_index_patch_specs()` 中，为失效层**追加**新版 alternatives（`original, replacement, allow_multi`），保留旧版作 fallback。
@@ -214,7 +236,12 @@ python3 patch_claude_3p_v2.py \
 node --check <提取的-bundle>.js
 ```
 
-**AI 验证通过标准**：dry-run 全层 `applied`、JSON 报告无 `missing`/`ambiguous`、所有被 patch 文件 `node --check` 通过（CJS 模式）、`codesign --verify` OK。
+**AI 验证通过标准**：dry-run 全层 `applied`（含 L2d / L9 两个 renderer 层）、JSON 报告无 `missing`/`ambiguous`、所有被 patch 文件 `node --check` 通过（CJS 模式）、`codesign --verify` OK。
+
+> `node --check` 必须同时覆盖 **ASAR 内**（先按 asar header 提取到临时文件）和 **renderer 散文件**（`ion-dist/assets/v1/*.js` 直接检查）。
+>
+> 建议再补一次**幂等性检查**：对已打补丁的 App 重跑 dry-run，应全部报 `already_applied`；
+> 特别是 L9 的语言数组不能出现重复项（`"zh-CN","zh-CN"`）。
 
 ### 步骤 7 · 人工验证
 

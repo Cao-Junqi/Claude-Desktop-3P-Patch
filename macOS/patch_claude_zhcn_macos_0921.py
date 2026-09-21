@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-One-click zh-CN patcher for Claude Desktop 0903 on macOS.
+One-click zh-CN patcher for Claude Desktop on macOS (0921).
 
 What it does:
 1. Copies /Applications/Claude.app to a temporary working app.
-2. Installs Chinese i18n resources (0903: ion-dist/i18n/ and Resources/i18n/)
-3. Sets the current user's Claude config locale to zh-CN.
-4. Moves the original app to a timestamped backup and installs the patched app.
+2. Installs Chinese i18n resources (ion-dist/i18n/ for the frontend,
+   Resources/ for the desktop shell).
+3. Registers the language in the renderer's selectable-language array.
+4. Sets the current user's Claude config locale to zh-CN.
+5. Moves the original app to a timestamped backup and installs the patched app.
 
-Changes in 0903:
-- Language whitelist validation moved to filesystem-based check (b3e function)
-- No longer needs to patch JavaScript language array
-- i18n files in two locations: ion-dist/i18n/ (frontend) and Resources/i18n/ (desktop)
+Changes in 2.2553.1:
+- The renderer language list is still a hardcoded JS array, so it must be
+  patched. Locale files alone are NOT enough: without the array entry the
+  language never appears in Settings -> Language.
+- 3P model validation moved outside app.asar; use the 3P script for that.
 
 Run from this folder:
-    sudo /usr/bin/python3 macOS/patch_claude_zhcn_macos_0903.py --user-home "$HOME"
+    sudo /usr/bin/python3 macOS/patch_claude_zhcn_macos_0921.py --user-home "$HOME"
 """
 
 from __future__ import annotations
@@ -52,6 +55,9 @@ LANG_LIST_RE = re.compile(
     r'\["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt-BR","id-ID"(?:(?:,"zh-CN")|(?:,"zh-TW")|(?:,"zh-HK"))*\]'
 )
 BASE_LANGUAGE_LIST = '["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt-BR","id-ID"'
+# Renderer array as it ships in 2.2553 (assigned to `Am`); the closing bracket is
+# kept off so the splice point stays unambiguous.
+BASE_LANGUAGE_ARRAY = b'["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt-BR","id-ID"]'
 
 
 def get_language_config(lang_code: str) -> dict[str, Any]:
@@ -136,18 +142,40 @@ def copy_app(src: Path, dst: Path) -> None:
 
 def patch_language_whitelist(app: Path, lang_code: str) -> Path:
     """
-    0903: Language validation is filesystem-based (b3e function scans i18n/*.json).
-    No JavaScript patching needed - just ensure the JSON files exist.
-    """
-    # Check if zh-CN.json exists in both locations
-    frontend_i18n = app / FRONTEND_I18N_REL / f"{lang_code}.json"
-    desktop_i18n = app / DESKTOP_RESOURCES_REL / "i18n" / f"{lang_code}.json"
+    Register the language in the renderer's selectable-language list.
 
-    if frontend_i18n.exists() and desktop_i18n.exists():
-        print(f"Language files already installed: {lang_code}")
+    0903 kept this list in a hardcoded JS array inside ion-dist; 2.2553 still
+    does (`var Am=[...]` in a content-hashed asset). The array drives the
+    Settings → Language picker, so a language whose JSON files exist but which
+    is absent from the array never appears in the UI.
+    """
+    frontend_i18n = app / FRONTEND_I18N_REL / f"{lang_code}.json"
+    desktop_i18n = app / DESKTOP_RESOURCES_REL / f"{lang_code}.json"
+    if not frontend_i18n.exists() and not desktop_i18n.exists():
+        print(f"Warning: {lang_code} locale files not installed yet; run the locale merge first")
+
+    assets_dir = app / FRONTEND_ASSETS_REL
+    if not assets_dir.is_dir():
+        print(f"Warning: renderer assets not found in {assets_dir}; skipping language list patch")
         return frontend_i18n
 
-    print(f"Note: 0903 uses filesystem-based language validation, no JS patching needed")
+    marker = f'"{lang_code}"'.encode()
+    for path in sorted(assets_dir.glob("*.js")):
+        data = path.read_bytes()
+        pos = data.find(BASE_LANGUAGE_ARRAY)
+        if pos < 0:
+            continue
+        if marker in data:
+            print(f"Language list already contains {lang_code}: {path.name}")
+            return frontend_i18n
+        # Splice into the base array (equal length is not required here: this file
+        # lives outside app.asar, so there is no ASAR payload layout to preserve).
+        updated = data[: pos + len(BASE_LANGUAGE_ARRAY) - 1] + b"," + marker + b"]" + data[pos + len(BASE_LANGUAGE_ARRAY):]
+        path.write_bytes(updated)
+        print(f"Patched language list (+{lang_code}): {path.name}")
+        return frontend_i18n
+
+    print(f"Warning: could not locate the renderer language list; {lang_code} may not appear in Settings")
     return frontend_i18n
 
 
@@ -296,7 +324,6 @@ def patch_hardcoded_frontend_strings(app: Path, lang_code: str) -> None:
         'title:"Bedrock service tier"': 'title:"Bedrock 服务层级"',
         'title:"Azure AI Foundry resource name"': 'title:"Azure AI Foundry 资源名称"',
         'title:"Azure AI Foundry API key"': 'title:"Azure AI Foundry API 密钥"',
-        'title:"Model list"': 'title:"模型列表"',
         'title:"Managed MCP servers"': 'title:"托管的 MCP 服务器"',
         'description:\'JSON array of MCP server configs. Each entry: `name` (string, required, unique within array), `url` (https URL, required), `transport` ("http" or "sse", default "http"), `headers` (string→string map, optional, mutually exclusive with `oauth`), `headersHelper` (absolute path to local executable that prints a JSON object of HTTP headers on stdout — for rotating bearers; optional, mutually exclusive with `oauth`; merged over `headers`, helper wins on conflict. The helper runs with the app\'s launch environment, not your shell rc — read credentials from keychain/file or source them explicitly in the script), `headersHelperTtlSec` (positive integer, default 300 — re-runs the helper at most once per TTL across connection attempts), `oauth` (boolean or object, optional — `true` triggers dynamic-registration PKCE; `{"clientId":"<id>"}` skips registration and uses a pre-registered public client (register redirect URI `http://127.0.0.1:53280/callback` on it — Entra/Google accept the portless `http://127.0.0.1/callback`, but providers that match the port exactly need 53280). Optional `tenantId` (Entra Directory ID) pins the authorization server for single-tenant apps; `scope` is required when `tenantId` is set), `toolPolicy` (toolName→"allow"/"ask"/"blocked", optional — locks the per-tool approval state; unset = user controls). Connections are made from a host-side utility process and do not pass through the in-VM allowlist.\'': 'description:\'MCP 服务器配置的 JSON 数组。每项包含：`name`（字符串，必填，数组内唯一）、`url`（https URL，必填）、`transport`（"http" 或 "sse"，默认 "http"）、`headers`（字符串到字符串映射，可选，与 `oauth` 互斥）、`headersHelper`（本地可执行文件绝对路径，会向 stdout 输出 HTTP 请求头 JSON 对象，用于轮换 bearer；可选，与 `oauth` 互斥；会覆盖合并到 `headers`，冲突时辅助脚本优先）、`headersHelperTtlSec`（正整数，默认 300，在 TTL 内连接时最多重新运行一次）、`oauth`（布尔值或对象，可选）、`toolPolicy`（工具名到 "allow"/"ask"/"blocked"，可选，用于锁定每个工具的批准状态；未设置则由用户控制）。连接由主机侧工具进程发起，不经过虚拟机内允许列表。\'',
         'title:"Organization UUID"': 'title:"组织 UUID"',
@@ -641,7 +668,10 @@ def patch_custom3p_model_validation(app: Path) -> None:
             return
         patched_content = patch_custom3p_name_validator(content)
         if patched_content is None:
-            print("Note: Could not patch custom 3P model validation (0903: may be removed/relocated)")
+            # 0903+ moved model validation out of app.asar into the renderer bundle
+            # (ion-dist) and the main-process chunks; the standalone localization
+            # script does not carry those signatures. Use the 3P patcher for 3P mode.
+            print("Note: 3P model validation lives outside app.asar since 0903; use patch_claude_3p_macos_*.py to unlock 3P models")
             return
     else:
         anchor = match.group(0)
@@ -755,6 +785,12 @@ def merge_frontend_locale(app: Path, lang_code: str) -> tuple[int, int, int]:
             fallback += 1
 
     save_json(target, merged)
+
+    # 0903 版本需要 .overrides.json 文件才能在语言列表中显示
+    overrides_file = app / FRONTEND_I18N_REL / f"{lang_code}.overrides.json"
+    if not overrides_file.exists():
+        save_json(overrides_file, {})
+
     extra = len(set(zh_pack) - set(en))
     print(f"Installed frontend {lang_code}: {translated} translated, {fallback} fallback, {extra} extra old keys ignored")
     return translated, fallback, extra
@@ -1024,14 +1060,16 @@ def main() -> int:
     patched_app = tmp_root / "Claude.app"
 
     copy_app(args.app, patched_app)
+    # Locale files first: the language-list patch reports whether the matching
+    # catalogs are actually present.
+    merge_frontend_locale(patched_app, lang_code)
+    install_desktop_locale(patched_app, lang_code)
+    install_statsig_locale(patched_app, lang_code)
     patch_language_whitelist(patched_app, lang_code)
     patch_hardcoded_frontend_strings(patched_app, lang_code)
     patch_language_display_names(patched_app)
     patch_hardcoded_main_process_menu_labels(patched_app)
     patch_custom3p_model_validation(patched_app)
-    merge_frontend_locale(patched_app, lang_code)
-    install_desktop_locale(patched_app, lang_code)
-    install_statsig_locale(patched_app, lang_code)
     resign_app(patched_app)
     clear_quarantine(patched_app)
     if args.dry_run:

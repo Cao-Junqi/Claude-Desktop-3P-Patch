@@ -2,13 +2,20 @@
 
 Claude Desktop 第三方模型解锁 + 中文汉化工具
 
-**当前适配版本**: Claude Desktop 0903 (1.44121.4)  
-**汉化翻译**: 自研，24000+ 条专业翻译（2026-08-11 完成）  
-**最后更新**: 2026-09-03
+**当前适配版本**: Claude Desktop `2.2553.1`（构建日 0918；同时支持 `1.44121.4`）
+**汉化翻译**: 自研，24000+ 条专业翻译
+**最后更新**: 2026-09-21
 
 ---
 
 ## 📋 更新日志
+
+### 2026-09-21 - 适配 2.2553.1 + renderer 层补丁（关键修复）
+- ✅ 新增 **L2d**：渲染进程（`ion-dist`）模型校验器 —— 修复「只补主进程仍报 model 拦截」
+- ✅ 新增 **L9**：渲染进程语言列表 —— 修复「装了汉化但语言选项里没有中文」
+- ✅ L1 / L2 / L2c / L4 / L6 更新 2.2553 特征码
+- ✅ 修复汉化脚本桥接路径失效（`--zh-cn` 曾直接报错退出）
+- ✅ 验证：dry-run 全命中、`node --check` 全通过、codesign 通过、幂等重跑无副作用
 
 ### 2026-09-03 - 适配 Claude Desktop 0903 + 汉化脚本更新
 - ✅ 更新 macOS 3P patch 脚本支持 0903 (1.44121.4)
@@ -50,11 +57,12 @@ Claude Desktop 第三方模型解锁 + 中文汉化工具
 Claude-Desktop-3P-Patch/
 │
 ├── macOS/                                    🍎 macOS 平台
-│   ├── patch_claude_3p_macos_0903.py       第三方模型 patch (0903 最新)
-│   ├── patch_claude_zhcn_macos_0903.py     中文汉化脚本 (0903 最新)
+│   ├── patch_claude_3p_macos_0921.py       第三方模型 patch (2.2553.1 最新)
+│   ├── patch_claude_zhcn_macos_0921.py     中文汉化脚本 (2.2553.1 最新)
 │   ├── patch_claude_3p_macos_0811.py       第三方模型 patch (0811 旧版)
 │   ├── patch_claude_zhcn_macos.py          中文汉化脚本 (0811 旧版)
 │   ├── resources/                           汉化资源文件
+│   ├── test_0921_summary.md                 2.2553.1 测试报告
 │   └── README.md                            macOS 使用说明
 │
 ├── Windows/                                  🪟 Windows 平台
@@ -85,11 +93,15 @@ Claude-Desktop-3P-Patch/
 # 进入 macOS 目录
 cd macOS
 
-# 第三方模型 patch（0903 最新版本）
-sudo python3 patch_claude_3p_macos_0903.py
+# 先 dry-run 确认全层命中（不写 App）
+python3 patch_claude_3p_macos_0921.py \
+  --app /Applications/Claude.app \
+  --provider gateway --feature-recovery --zh-cn --dry-run
 
-# 中文汉化（可选，0903 最新版本）
-sudo python3 patch_claude_zhcn_macos_0903.py --user-home "$HOME"
+# 第三方模型 patch + 禁用自动更新 + 本地能力恢复 + 汉化
+sudo python3 patch_claude_3p_macos_0921.py \
+  --app /Applications/Claude.app \
+  --provider gateway --feature-recovery --zh-cn
 ```
 
 详见 [macOS/README.md](macOS/README.md)
@@ -129,8 +141,8 @@ python patch_claude_3p_windows_0811.py
 
 | 平台 | 脚本版本 | 适配 Claude 版本 | 状态 | 更新位置 |
 |------|---------|-----------------|------|---------|
-| macOS | 0811 | 1.26832.0 | ✅ 完成 | 本机 Mac |
-| Windows | 0811 | Windows 版 | ✅ 完成 | Windows 机器 |
+| macOS | 0903 | 2.2553.1 / 1.44121.4 | ✅ 完成 | 本机 Mac |
+| Windows | 0811 | Windows 版 | ⚠️ 待跟进（未适配 2.x） | Windows 机器 |
 
 ---
 
@@ -151,9 +163,10 @@ python patch_claude_3p_windows_0811.py
 ## 📝 更新流程
 
 ### macOS 版本更新
-1. 在本机 Mac 更新 `macOS/patch_claude_3p_macos_0811.py`
-2. 更新 `macOS/resources/` 汉化资源（如需要）
-3. 测试后提交
+1. 按 [SOP.md](SOP.md)「流程 2：脚本更新流程」执行（dry-run → 提取 bundle → 定位新特征码 → 更新 `build_index_patch_specs()` → 验证）
+2. ⚠️ 记得同时检查 **`ion-dist`（ASAR 外）** 的 L2d / L9 两层是否命中
+3. 更新 `macOS/resources/` 汉化资源（如需要）
+4. 测试后提交
 
 ### Windows 版本更新
 1. 在 Windows 机器上更新 `Windows/patch_claude_3p_windows_0811.py`
@@ -163,6 +176,6 @@ python patch_claude_3p_windows_0811.py
 
 ---
 
-**最后更新**: 2026-09-03  
-**维护者**: 项目团队  
+**最后更新**: 2026-09-21
+**维护者**: 项目团队
 **许可**: 内部使用

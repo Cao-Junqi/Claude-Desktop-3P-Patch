@@ -43,22 +43,42 @@ patch_claude_3p_v2.py
 | 项 | 值 |
 |---|---|
 | 系统 | macOS |
-| 主安装包 | `Claude-0811.dmg` |
-| 已验证 Claude Desktop 版本 | `1.26832.0` |
+| 已验证 Claude Desktop 版本 | `2.2553.1`（构建日 0918） |
+| 上一版本 | `1.44121.4`（0903） |
 | Bundle ID | `com.anthropic.claudefordesktop` |
-| 主脚本 | `patch_claude_3p_v2.py` |
-| 旧基线脚本 | `patch_claude.py` |
-| 中文汉化辅助脚本 | `patch_claude_zh_cn.py` |
-| 中文资源目录 | `resources/` |
+| 3P 主脚本 | `macOS/patch_claude_3p_macos_0921.py` |
+| 汉化脚本 | `macOS/patch_claude_zhcn_macos_0921.py` |
+| 中文资源目录 | `macOS/resources/` |
+| 旧版本脚本 | `macOS/patch_claude_3p_macos_0811.py`、`macOS/patch_claude_zhcn_macos.py` |
+
+> 脚本文件名保留 `0903`（首版适配时的命名），实际同时支持 `1.44121.4` 与 `2.2553.1`：每个 patch 层都保留多版本特征码，逐条尝试。
+
+---
+
+## ⚠️ 关键结构：renderer 在 app.asar 之外
+
+`Contents/Resources/ion-dist/` **不在 `app.asar` 内**，是独立目录。这导致过两类真实故障：
+
+1. **渲染进程有自己的模型校验器副本**。主进程的 `Yo()` 与渲染进程的 `At()` 是两套独立代码，只补前者时 Settings 仍会拒绝 3P 模型名，报 `Doesn't look like an Anthropic model: 需要一个引用 Anthropic 模型的网关模型路由…`。
+2. **语言选择器的可选语言是硬编码数组**（`Am`，导出为 `vm`，被 `shared-21` 当作 `offeredLocales`）。`zh-CN.json` 存在但不在数组里就不会出现在下拉框。
+
+对应新增的两个 patch 层（见下表 L2d / L9）。文件名带内容哈希（如 `ce459c687-B4NlOXPM.js`），必须**按内容定位**，不能按文件名。
 
 ---
 
 ## 关键路径与常量
 
-`patch_claude_3p_v2.py` 中的重要常量：
+`macOS/patch_claude_3p_macos_0921.py` 中的重要常量：
 
 ```python
 APP_DEFAULT = Path("/Applications/Claude.app")
+APP_ASAR_REL = Path("Contents/Resources/app.asar")
+ASAR_INDEX_PREFIX = ".vite/build/index"          # 0811+ 代码分割，多文件扫描
+ASAR_SWIFT = "node_modules/@ant/claude-swift/js/index.js"
+FRONTEND_ASSETS_REL = Path("Contents/Resources/ion-dist/assets/v1")   # renderer（ASAR 外）
+POLICY_DOMAIN = "com.anthropic.claudefordesktop"
+LANG_CHOICES = ["zh-CN", "zh-TW", "zh-HK"]
+```
 ROOT = Path(__file__).resolve().parent
 DEFAULT_DMG = ROOT / "Claude-0703.dmg"
 APP_ASAR_REL = Path("Contents/Resources/app.asar")
@@ -125,20 +145,41 @@ LOCAL_FEATURE_BOOL_KEYS = [
 
 ## 3P patch 层说明
 
-当前 0703 已验证的 ASAR patch 层：
+当前（`2.2553.1`）已验证的 patch 层。每个层都保留历史版本特征码，按顺序尝试，命中即止：
 
-| 层 | 含义 | 目标文件 |
+| 层 | 含义 | 目标文件（2.2553） |
 |---|---|---|
-| L1 | 3P managed config `safeParse` bypass | `.vite/build/index.js` |
-| L2 | model picker empty allowlist bypass | `.vite/build/index.js` |
-| L2b | model picker terminal `some()` bypass | `.vite/build/index.js` |
-| L2c | gateway model route validator bypass | `.vite/build/index.js` |
+| L1 | 3P managed config `safeParse` bypass | `index.chunk-ChZ67Jhw.js`（`uOt`/`vOt` 两个 helper） |
+| L2 | model picker empty allowlist bypass | `index.chunk-l0PS_wmg.js`（`hC`） |
+| L2b | model picker terminal `some()` bypass | 新版已无此结构，无需 patch |
+| L2c | gateway model route validator bypass | `index.chunk-ChZ67Jhw.js`（`Hxe`/`Uxe`/`Wxe` + 门 `Jo`）、`index.pre.js`（`KS`/`qS`/`JS` + 门 `US`） |
+| **L2d** | **renderer 模型校验器 bypass** | **`ion-dist/assets/v1/ce459c687-*.js`（`Dt`/`Ot`/`kt` + 门 `wt`）** |
 | L3b | `@ant/claude-swift` virtualization support | `node_modules/@ant/claude-swift/js/index.js` |
-| L4 | auto-update forced early return | `.vite/build/index.js` |
-| L6 | session title fallback | `.vite/build/index.js` |
-| L7 | effort `xhigh` compatibility | `.vite/build/index.js` |
+| L4 | auto-update forced early return | `index.chunk-ChZ67Jhw.js`（接收器 `K()`，4 处） |
+| L5 | inference model catalog throw bypass | 新版只做过滤不抛错，无需 patch |
+| L6 | session title fallback | `index.chunk-ChZ67Jhw.js`（两个 catch，其一带 `{title:""}`） |
+| L7 | effort `xhigh` compatibility | 新版 `cwn` 原生排除 xhigh，无需 patch |
+| **L9** | **renderer 语言列表（zh-CN/TW/HK）** | **`ion-dist/assets/v1/shared-2-*.js`（数组 `Am`）** |
 
-0703 验证过的典型 offsets（仅用于排查，不作为 patch 定位依据）：
+> L2d / L9 是 2026-09-21 新增，针对 `ion-dist`（ASAR 外）。**排查「模型被拦」「语言列表没有中文」时优先看这两层**，见上文「关键结构」。
+>
+> L2b / L5 / L7 属于「新版原生已处理」，脚本里保留注释说明而非留空。
+
+2.2553 实测 offsets（仅用于排查，不作为 patch 定位依据）：
+
+```text
+L1:   2202100, 2204237          (index.chunk-ChZ67Jhw.js)
+L2:   544651                     (index.chunk-l0PS_wmg.js)
+L2c:  656212, 657149, 657304, 657498, 657608   (index.chunk-ChZ67Jhw.js)
+      331722, 332527, 332682, 332875, 332984   (index.pre.js)
+L2d:  2190, 2714, 2993, 3148, 3341, 3450       (ion-dist ce459c687-*.js)
+L4:   3723488, 3999143, 4007060, 4007989, 4008385
+L6:   3965744, 3966058
+L9:   90040 附近（数组 Am 结尾处）
+L3b:  3353
+```
+
+0703 历史 offsets：
 
 ```text
 L1:  6621284

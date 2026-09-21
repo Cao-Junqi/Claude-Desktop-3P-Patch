@@ -1,22 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Claude Desktop 3P patcher v2 (0903-aware)
-==========================================
+Claude Desktop 3P patcher (0921)
+================================
 
-Patches Claude Desktop 0903 (1.44121.4) for 3P/Cowork compatibility.
-Can patch an installed Claude.app or copy Claude.app from a DMG into a
-temporary workspace, apply compatibility patches, recalculate ASAR integrity,
-re-sign the app, and emit a capability report for 3P deployments.
+Patches Claude Desktop 2.2553.1 (built 0918) and 1.44121.4 (0903) for
+3P/Cowork compatibility. Can patch an installed Claude.app or copy Claude.app
+from a DMG into a temporary workspace, apply compatibility patches, recalculate
+ASAR integrity, re-sign the app, and emit a capability report for 3P
+deployments.
 
 Default behavior is conservative: when --dmg/--from-dmg is used, the script
 patches a temporary app and does NOT replace /Applications/Claude.app unless
 --install is passed.
 
-Changes from 0811:
-- L1: Updated safeParse pattern with regex matching (variable names changed)
-- L5: Removed (feature no longer present in 0903)
-- L2/L4/L6: Unchanged, patterns still valid
+Patch layers (see build_index_patch_specs / build_renderer_patch_specs):
+- L1/L2/L2c/L4/L6  main-process bundle (.vite/build/, inside app.asar)
+- L3b              @ant/claude-swift virtualization support
+- L2d/L9           renderer bundle (ion-dist/, OUTSIDE app.asar) — model
+                   validators and the selectable-language list. Missing these
+                   makes Settings reject 3P model IDs and hides Chinese from
+                   the language picker even though the locale files are present.
+
+Changes from 0903:
+- L1/L2/L2c/L4/L6 updated for 2.2553 (renamed validators, K() updater receiver)
+- L2d added: renderer-side model route validators (independent copy)
+- L9  added: renderer selectable-language array
+- L2b/L5/L7 remain unnecessary (handled natively by the new builds)
 """
 
 from __future__ import annotations
@@ -103,9 +113,14 @@ LANG_CHOICES = ["zh-CN", "zh-TW", "zh-HK"]
 
 
 def load_zh_cn_patcher():
-    module_path = ROOT / "patch_claude_zh_cn.py"
-    if not module_path.exists():
-        raise SystemExit(f"Missing localization helper: {module_path}")
+    # The helper is renamed per version; older names stay as fallbacks so the
+    # 3P script keeps working when the localization script is rolled forward.
+    for name in ("patch_claude_zhcn_macos_0921.py", "patch_claude_zhcn_macos_0903.py", "patch_claude_zh_cn.py"):
+        module_path = ROOT / name
+        if module_path.exists():
+            break
+    else:
+        raise SystemExit(f"Missing localization helper in {ROOT}")
     spec = importlib.util.spec_from_file_location("patch_claude_zh_cn", module_path)
     if spec is None or spec.loader is None:
         raise SystemExit(f"Could not load localization helper: {module_path}")
@@ -339,6 +354,19 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                     pad_bytes(b'let i={data:r,success:1};if(0)throw', len(b'let i=syt.safeParse(r);if(!i.success)throw')),
                     False,
                 ),
+                # 2.2553: the two custom3p helper validators (clientSecret / env)
+                # moved to index.chunk-ChZ67Jhw.js; zod schema objects renamed
+                # (syt→uOt for the secret helper, hyt→vOt for the env helper).
+                (
+                    b'let i=uOt.safeParse(r);if(!i.success)throw',
+                    pad_bytes(b'let i={data:r,success:1};if(0)throw', len(b'let i=uOt.safeParse(r);if(!i.success)throw')),
+                    False,
+                ),
+                (
+                    b'let l=vOt.safeParse(c);if(!l.success)throw',
+                    pad_bytes(b'let l={data:c,success:1};if(0)throw', len(b'let l=vOt.safeParse(c);if(!l.success)throw')),
+                    False,
+                ),
             ],
         ),
         (
@@ -360,16 +388,24 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                     b'function ES(e){let t=`claude`,____=e;return TS.test(t)?!1:CS.test(t)||wS.some((e=>t.includes(e)))}',
                     False,
                 ),
+                # 2.2553: the picker allowlist moved into hC(e,n) in
+                # index.chunk-l0PS_wmg.js — an empty available-model list now
+                # returns !1, hiding every 3P model from the picker.
+                (
+                    b'if(e.startsWith("claude-"))return!0;if(n.length===0)return!1;',
+                    b'if(e.startsWith("claude-"))return!0;if(n.length===0)return!0;',
+                    False,
+                ),
             ],
         ),
         (
-            "L2b model picker terminal some() bypass",
+            "L2b model picker terminal some() bypass [not needed since 0811]",
             [
                 (b'return e.some(i=>i===A||$d(i)===t)}', b'return e.some(i=>!0);/*padpadpad*/}', False),
                 (b'return e.some(r=>r===A||qB(r)===t)}', b'return e.some(r=>!0);/*padpadpad*/}', False),
                 # 0811: the terminal some() allowlist is gone; model visibility is now
                 # gated by the {ok:!1,reason:} validators handled in L2/L2c, so no new
-                # signature here.
+                # signature here. 2.2553: still absent — same reasoning applies.
             ],
         ),
         (
@@ -391,6 +427,33 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 (b'function QB(e){return qB(e)?{ok:!0}:{ok:!1,reason:', b'function QB(e){return qB(e)?{ok:!0}:{ok:!0,reason:', False),
                 (b'function XB(e){return qB(e)?{ok:!0}:{ok:!1,reason:', b'function XB(e){return qB(e)?{ok:!0}:{ok:!0,reason:', False),
                 (b'function ZB(e){return qB(e)?{ok:!0}:{ok:!1,reason:', b'function ZB(e){return qB(e)?{ok:!0}:{ok:!0,reason:', False),
+                # 2.2553: validators renamed and now share one gate Jo() (the ES()
+                # successor) plus a Bedrock/Vertex pair. Renderer side lives in
+                # index.chunk-ChZ67Jhw.js: Hxe=Foundry, Uxe=Anthropic, Wxe=gateway.
+                (b'function Hxe(e){return Jo(e)?{ok:!0}:{ok:!1,reason:', b'function Hxe(e){return Jo(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function Uxe(e){return Jo(e)?{ok:!0}:{ok:!1,reason:', b'function Uxe(e){return Jo(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function Wxe(e){return Jo(e)?{ok:!0}:{ok:!1,reason:', b'function Wxe(e){return Jo(e)?{ok:!0}:{ok:!0,reason:', False),
+                # 2.2553: Vertex validator is inline (no Jo() call) and lives in both
+                # the renderer chunk (Vxe) and the preload (GS).
+                (b'e.toLowerCase().startsWith("claude-")?{ok:!0}:{ok:!1,reason:', b'e.toLowerCase().startsWith("claude-")?{ok:!0}:{ok:!0,reason:', False),
+                # 2.2553: Jo() is the shared gate behind the three validators above;
+                # its blacklist regex Ixe killed 3P names (minimax/glm/deepseek/...).
+                # Pinning t to a whitelisted literal makes it always-true.
+                (
+                    b'function Jo(e){let t=e.toLowerCase();return Ixe.test(t)?!1:qo.test(t)||Fxe.some((e=>t.includes(e)))}',
+                    b'function Jo(e){let t=`claude`,____=e;return Ixe.test(t)?!1:qo.test(t)||Fxe.some((e=>t.includes(e)))}',
+                    False,
+                ),
+                # 2.2553: preload copies renamed (KS=Foundry, qS=Anthropic, JS=gateway)
+                # with US() as their shared gate.
+                (b'function KS(e){return US(e)?{ok:!0}:{ok:!1,reason:', b'function KS(e){return US(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function qS(e){return US(e)?{ok:!0}:{ok:!1,reason:', b'function qS(e){return US(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function JS(e){return US(e)?{ok:!0}:{ok:!1,reason:', b'function JS(e){return US(e)?{ok:!0}:{ok:!0,reason:', False),
+                (
+                    b'function US(e){let t=e.toLowerCase();return HS.test(t)?!1:BS.test(t)||VS.some((e=>t.includes(e)))}',
+                    b'function US(e){let t=`claude`,____=e;return HS.test(t)?!1:BS.test(t)||VS.some((e=>t.includes(e)))}',
+                    False,
+                ),
             ],
         ),
         (
@@ -424,11 +487,17 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 # two receiver shapes (n / W()); same disabled->dis equal-length trick.
                 (b'if(n.autoUpdate.disabled){', pad_bytes(b'if(1||n.autoUpdate.dis){', len(b'if(n.autoUpdate.disabled){')), False),
                 (b'if(W().autoUpdate.disabled){', pad_bytes(b'if(1||W().autoUpdate.dis){', len(b'if(W().autoUpdate.disabled){')), True),
+                # 2.2553: updater entry lives in index.chunk-ChZ67Jhw.js and reads the
+                # policy through K() (4 guards: 3 block form + 1 early-return form).
+                (b'if(K().autoUpdate.disabled){', pad_bytes(b'if(1||K().autoUpdate.dis){', len(b'if(K().autoUpdate.disabled){')), True),
+                (b'if(K().autoUpdate.disabled)return', pad_bytes(b'if(1||K().autoUpdate.dis)return', len(b'if(K().autoUpdate.disabled)return')), False),
             ],
         ),
         # L5 removed in 0903: models validation no longer present or moved
         # The old pattern s.data.models);if(u)throw does not exist in 0903
         # This layer is commented out for 0903 compatibility
+        # 2.2553: still absent — inferenceModels filtering (Cke/wke) removes
+        # non-Anthropic IDs instead of throwing, so there is nothing to bypass here.
         # (
         #     "L5 inference model catalog throw bypass",
         #     [
@@ -462,10 +531,17 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                     pad_bytes(b'.catch(()=>String(t.first_session_message||"").slice(0,46))', 64),
                     True,
                 ),
+                # 2.2553: /dust/generate_title_and_branch now falls back to an object
+                # ({title:""}) instead of a bare string, so it needs its own variant.
+                (
+                    b'.catch((e=>(N.warn("[title-gen] failed",{error:String(e)}),{title:""})))',
+                    pad_bytes(b'.catch(()=>({title:String(t.first_session_message||"").slice(0,46)}))', 72),
+                    True,
+                ),
             ],
         ),
         (
-            "L7 effort xhigh compatibility",
+            "L7 effort xhigh compatibility [not needed since 0811]",
             [
                 (b'function qUA(A){return A!=null&&wQr.has(A)?A:void 0}', b'function qUA(A){return A!=null&&mQr.has(A)?A:void 0}', False),
                 # 0703 moved this logic into config-derived effort sets. Keep xhigh out of generic/default options.
@@ -477,6 +553,9 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 # 0811: no patch needed — the accepted-effort set `C` natively excludes
                 # xhigh and the resolver `T()` falls back to medium for anything else
                 # (index.chunk-DM383TMs.js), so xhigh is never sent to 3P models.
+                # 2.2553: same shape — `cwn` (["low","medium","high","max"]) gates the
+                # request effort and `uwn()` falls back to "medium" (index.chunk-ChZ67Jhw.js),
+                # so xhigh never reaches a 3P model.
             ],
         ),
     ]
@@ -528,6 +607,165 @@ def patch_swift(content: bytes) -> tuple[bytes, list[dict[str, Any]]]:
     replacement = b'    this.vm.isVirtualizationSupported = () => "supported";                   \n'
     patched, result = patch_exact(content, original, replacement, "L3b claude-swift virtualization support")
     return patched, [result]
+
+
+# ---------------------------------------------------------------------------
+# Renderer (ion-dist) layer
+#
+# The renderer bundle lives in Contents/Resources/ion-dist/ — OUTSIDE app.asar,
+# so the ASAR layers above never touch it. It carries a second, independent copy
+# of the 3P model validators (the ones the Settings UI calls) plus the hardcoded
+# list of selectable languages. Missing either one is visible to the user as
+# "doesn't look like an Anthropic model" or "no Chinese in the language list".
+
+# Files are content-hashed (e.g. ce459c687-B4NlOXPM.js), so locate by content.
+# Each tuple lists the pre-patch needle first and the post-patch marker second, so
+# an already-patched app is still recognised on a re-run.
+RENDERER_VALIDATOR_NEEDLES = (
+    b'expected a gateway model route referencing an Anthropic model',
+    b'function wt(e){let t=e.toLowerCase();return Ct.test(t)?!1',
+    b'function wt(e){let t=`claude`',  # already patched
+)
+RENDERER_LOCALE_NEEDLES = (
+    # Prefix only (no closing bracket): stays matchable after the languages are
+    # spliced in, which keeps a re-run idempotent.
+    b'var Am=["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt-BR","id-ID"',
+    b'["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt-BR","id-ID"',
+)
+
+
+def build_renderer_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]]]:
+    """Validators the renderer evaluates for 3P model IDs.
+
+    Same equal-length `{ok:!1,reason:` → `{ok:!0,reason:` trick as the ASAR
+    layers, plus pinning the shared gate (`wt`) to a whitelisted literal so the
+    non-Anthropic blacklist regex stops rejecting 3P names.
+    """
+    return [
+        (
+            "L2d renderer model route validator bypass",
+            [
+                # Shared gate: blacklist regex Ct rejects minimax/glm/deepseek/…
+                (
+                    b'function wt(e){let t=e.toLowerCase();return Ct.test(t)?!1:xt.test(t)||St.some(e=>t.includes(e))}',
+                    b'function wt(e){let t=`claude`,____=e;return Ct.test(t)?!1:xt.test(t)||St.some(e=>t.includes(e))}',
+                    False,
+                ),
+                # Per-provider validators: Dt=Foundry, Ot=Anthropic, kt=gateway.
+                (b'function Dt(e){return wt(e)?{ok:!0}:{ok:!1,reason:', b'function Dt(e){return wt(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function Ot(e){return wt(e)?{ok:!0}:{ok:!1,reason:', b'function Ot(e){return wt(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function kt(e){return wt(e)?{ok:!0}:{ok:!1,reason:', b'function kt(e){return wt(e)?{ok:!0}:{ok:!0,reason:', False),
+                # Vertex is inline (no wt call); Bedrock returns a warn on the happy path.
+                (b'e.toLowerCase().startsWith("claude-")?{ok:!0}:{ok:!1,reason:', b'e.toLowerCase().startsWith("claude-")?{ok:!0}:{ok:!0,reason:', False),
+                (
+                    b'{ok:!1,reason:\'expected a Bedrock model ID with the "anthropic." vendor prefix',
+                    b'{ok:!0,reason:\'expected a Bedrock model ID with the "anthropic." vendor prefix',
+                    False,
+                ),
+            ],
+        ),
+    ]
+
+
+def find_renderer_files(app: Path, needles: tuple[bytes, ...]) -> list[Path]:
+    """Return the (content-hashed) renderer files matching any needle."""
+    assets = app / FRONTEND_ASSETS_REL
+    if not assets.is_dir():
+        return []
+    found: list[Path] = []
+    for path in sorted(assets.glob("*.js")):
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        if any(needle in data for needle in needles):
+            found.append(path)
+    return found
+
+
+def patch_renderer(app: Path, *, dry_run: bool = False) -> list[dict[str, Any]]:
+    """Patch the renderer validators and the selectable-language list."""
+    results: list[dict[str, Any]] = []
+
+    # --- model validators ---
+    specs = build_renderer_patch_specs()
+    targets = find_renderer_files(app, RENDERER_VALIDATOR_NEEDLES)
+    if not targets:
+        for label, _ in specs:
+            results.append(
+                {
+                    "label": label,
+                    "status": "missing",
+                    "matches": 0,
+                    "already_matches": 0,
+                    "offsets": [],
+                    "file": "ion-dist/assets/v1/*.js (none matched)",
+                }
+            )
+    for path in targets:
+        content = path.read_bytes()
+        for label, alternatives in specs:
+            content, res = apply_alternatives(content, label, alternatives)
+            for r in res:
+                results.append({**r, "file": str(path.relative_to(app))})
+        if not dry_run and content != path.read_bytes():
+            path.write_bytes(content)
+
+    # --- selectable language list ---
+    lang_targets = find_renderer_files(app, RENDERER_LOCALE_NEEDLES)
+    label = "L9 renderer language list (zh-CN/zh-TW/zh-HK)"
+    if not lang_targets:
+        results.append(
+            {
+                "label": label,
+                "status": "missing",
+                "matches": 0,
+                "already_matches": 0,
+                "offsets": [],
+                "file": "ion-dist/assets/v1/*.js (none matched)",
+            }
+        )
+    for path in lang_targets:
+        content = path.read_bytes()
+        # The needle is the array prefix up to `"id-ID"`, so the region to rewrite
+        # is everything from there to the closing `]`. Recomputing it each run keeps
+        # this idempotent: already-present languages are simply left in place.
+        base_pos = -1
+        for needle in RENDERER_LOCALE_NEEDLES:
+            pos = content.find(needle)
+            if pos >= 0:
+                base_pos = pos + len(needle)
+                break
+        if base_pos < 0:
+            continue
+
+        close = content.find(b"]", base_pos)
+        if close < 0:
+            continue
+        tail = content[base_pos:close]  # e.g. `,"zh-CN","zh-TW"` or empty
+        added: list[str] = []
+        for lang in LANG_CHOICES:
+            marker = f'"{lang}"'.encode()
+            if marker in tail:
+                results.append(
+                    {"label": label, "status": "already_applied", "matches": 0, "already_matches": 1, "offsets": [], "file": str(path.relative_to(app)), "lang": lang}
+                )
+                continue
+            tail = tail + b',' + marker
+            added.append(lang)
+
+        if added:
+            # Equal-length is not required: this file is outside app.asar, so
+            # there is no ASAR payload layout to preserve.
+            content = content[:base_pos] + tail + content[close:]
+            for lang in added:
+                results.append(
+                    {"label": label, "status": "applied", "matches": 1, "already_matches": 0, "offsets": [base_pos], "file": str(path.relative_to(app)), "lang": lang}
+                )
+        if not dry_run and content != path.read_bytes():
+            path.write_bytes(content)
+
+    return results
 
 
 def patch_asar(app: Path, *, dry_run: bool = False) -> dict[str, Any]:
@@ -1039,6 +1277,14 @@ def print_report(report: dict[str, Any]) -> None:
             status = p.get("status")
             if status in {"applied", "already_applied", "ambiguous"}:
                 print(f"  {status:15} {p.get('label')} [{p.get('file')}] offsets={p.get('offsets')}")
+    if "renderer" in report:
+        for p in report["renderer"]:
+            status = p.get("status")
+            if status in {"applied", "already_applied", "ambiguous"}:
+                extra = f" lang={p['lang']}" if p.get("lang") else ""
+                print(f"  {status:15} {p.get('label')} [{p.get('file')}]{extra} offsets={p.get('offsets')}")
+            else:
+                print(f"  {status:15} {p.get('label')} [{p.get('file')}]")
     if "signing" in report:
         print(f"Signing: {report['signing'].get('status')}")
     if "verification" in report:
@@ -1149,6 +1395,7 @@ def main() -> int:
             if not args.dry_run:
                 quit_claude()
             report["asar"] = patch_asar(target_app, dry_run=args.dry_run)
+            report["renderer"] = patch_renderer(target_app, dry_run=args.dry_run)
             if args.feature_recovery:
                 report["local_feature_ui"] = patch_local_feature_ui(target_app, dry_run=args.dry_run)
             if args.lang:
