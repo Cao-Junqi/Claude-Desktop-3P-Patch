@@ -17,15 +17,21 @@ patches a temporary app and does NOT replace /Applications/Claude.app unless
 Patch layers (see build_index_patch_specs / build_renderer_patch_specs):
 - L1/L2/L2c/L4/L6  main-process bundle (.vite/build/, inside app.asar)
 - L3b              @ant/claude-swift virtualization support
-- L2d/L9           renderer bundle (ion-dist/, OUTSIDE app.asar) — model
-                   validators and the selectable-language list. Missing these
-                   makes Settings reject 3P model IDs and hides Chinese from
-                   the language picker even though the locale files are present.
+- L2d/L9/L10       renderer bundle (ion-dist/, OUTSIDE app.asar) — model
+                   validators, the selectable-language list and the model
+                   picker's availableModels allowlist gate. Missing these
+                   makes Settings reject 3P model IDs, hides Chinese from
+                   the language picker, or greys out discovered 3P models
+                   in the model picker.
 
 Changes from 0903:
 - L1/L2/L2c/L4/L6 updated for 2.2553 (renamed validators, K() updater receiver)
 - L2d added: renderer-side model route validators (independent copy)
 - L9  added: renderer selectable-language array
+- L10 added: model picker availableModels allowlist gate bypass — gateway
+  model discovery fills the picker with non-Claude models, but a resolved
+  availableModels (e.g. ~/.claude/settings.json) greys them out as
+  "Unavailable"; the gate now always takes its no-restriction path
 - L2b/L5/L7 remain unnecessary (handled natively by the new builds)
 """
 
@@ -632,6 +638,47 @@ RENDERER_LOCALE_NEEDLES = (
     b'var Am=["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt-BR","id-ID"',
     b'["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt-BR","id-ID"',
 )
+RENDERER_ALLOWLIST_NEEDLES = (
+    # Model picker restriction gate: rows not matching the resolved settings'
+    # `availableModels` (e.g. ~/.claude/settings.json) are greyed out as
+    # "Not in availableModels set by … / Unavailable". Both supported versions
+    # share the `t.state==="set"&&n.some(e=>` fragment (one occurrence, in the
+    # content-hashed picker file); the leading `o=`/`a=` and matcher names
+    # differ per version, so the per-version full strings live in the specs.
+    b't.state==="set"&&n.some(e=>',
+    b't.state==="zet"&&n.some(e=>',  # already patched
+)
+
+
+def build_renderer_allowlist_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]]]:
+    """L10: stop the model picker from restricting rows by `availableModels`.
+
+    The picker's restriction selector only activates when the resolved
+    settings carry an allowlist: `x=t.state==="set"&&n.some(…)?t:void 0`.
+    Flipping `"set"` to a literal that never matches makes the selector always
+    resolve to `void 0`, which routes the gate into its no-restriction path
+    (`Il()` on 2.2553) — no greyed rows, no "Unavailable" suffix, no tooltip.
+    The desktop/CLI version gates in the same function are left intact.
+    """
+    return [
+        (
+            "L10 renderer model picker availableModels gate bypass",
+            [
+                # 2.2553: Rl() in the composer model picker (c360a9e1c-*.js)
+                (
+                    b'o=t.state==="set"&&n.some(e=>q(e,t.value))?t:void 0',
+                    b'o=t.state==="zet"&&n.some(e=>q(e,t.value))?t:void 0',
+                    False,
+                ),
+                # 0903: ld() — same gate, earlier shape (no cliVersionGated yet)
+                (
+                    b'a=t.state==="set"&&n.some(e=>G(e,t.value))?t:void 0',
+                    b'a=t.state==="zet"&&n.some(e=>G(e,t.value))?t:void 0',
+                    False,
+                ),
+            ],
+        ),
+    ]
 
 
 def build_renderer_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]]]:
@@ -762,6 +809,30 @@ def patch_renderer(app: Path, *, dry_run: bool = False) -> list[dict[str, Any]]:
                 results.append(
                     {"label": label, "status": "applied", "matches": 1, "already_matches": 0, "offsets": [base_pos], "file": str(path.relative_to(app)), "lang": lang}
                 )
+        if not dry_run and content != path.read_bytes():
+            path.write_bytes(content)
+
+    # --- model picker availableModels allowlist gate ---
+    allow_specs = build_renderer_allowlist_patch_specs()
+    allow_targets = find_renderer_files(app, RENDERER_ALLOWLIST_NEEDLES)
+    if not allow_targets:
+        for label, _ in allow_specs:
+            results.append(
+                {
+                    "label": label,
+                    "status": "missing",
+                    "matches": 0,
+                    "already_matches": 0,
+                    "offsets": [],
+                    "file": "ion-dist/assets/v1/*.js (none matched)",
+                }
+            )
+    for path in allow_targets:
+        content = path.read_bytes()
+        for label, alternatives in allow_specs:
+            content, res = apply_alternatives(content, label, alternatives)
+            for r in res:
+                results.append({**r, "file": str(path.relative_to(app))})
         if not dry_run and content != path.read_bytes():
             path.write_bytes(content)
 

@@ -4,11 +4,14 @@ Claude Desktop 第三方模型解锁 + 中文汉化工具
 
 **当前适配版本**: Claude Desktop `2.2553.1`（构建日 0918；同时支持 `1.44121.4`）
 **汉化翻译**: 自研，24000+ 条专业翻译
-**最后更新**: 2026-09-21
+**最后更新**: 2026-09-30
 
 ---
 
 ## 📋 更新日志
+
+### 2026-09-30 - L10：模型选择器 availableModels 过滤绕过
+- ✅ 新增 **L10**：模型发现填充的 3P 模型不再被 `~/.claude/settings.json` 的 `availableModels` 灰化（tooltip「不在…availableModels 中」→ 可正常选择）
 
 ### 2026-09-21 - 适配 2.2553.1 + renderer 层补丁（关键修复）
 - ✅ 新增 **L2d**：渲染进程（`ion-dist`）模型校验器 —— 修复「只补主进程仍报 model 拦截」
@@ -164,7 +167,7 @@ python patch_claude_3p_windows_0811.py
 
 ### macOS 版本更新
 1. 按 [SOP.md](SOP.md)「流程 2：脚本更新流程」执行（dry-run → 提取 bundle → 定位新特征码 → 更新 `build_index_patch_specs()` → 验证）
-2. ⚠️ 记得同时检查 **`ion-dist`（ASAR 外）** 的 L2d / L9 两层是否命中
+2. ⚠️ 记得同时检查 **`ion-dist`（ASAR 外）** 的 L2d / L9 / L10 三层是否命中
 3. 更新 `macOS/resources/` 汉化资源（如需要）
 4. 测试后提交
 

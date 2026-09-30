@@ -4,6 +4,45 @@
 
 ---
 
+## 2026-09-30 — L10：模型选择器 availableModels 过滤绕过
+
+### 症状
+
+模型发现（`/v1/models`）填充的模型选择器里，非 Claude 模型（GPT/Grok/Haiku 等）全部灰化，
+tooltip「不在 你的 Claude Code 设置 设置的 availableModels 中 (~/.claude/settings.json)」，
+后缀「Unavailable」，无法选择。
+
+### 根因
+
+发现本身正常，是 **picker 的 UI 门控**把它们禁用了：
+
+- 主进程 SettingsResolver 跨层级合并 `availableModels`（用户级 `~/.claude/settings.json` 优先，
+  本例为 `["opus","sonnet","fable"]`）；
+- 渲染进程 picker 的 `Rl()`（0903 为 `ld()`）在 `t.state==="set"` 时激活 allowlist 门控，
+  行名不匹配 `q(model, value)` 的全部灰化。别名 opus/sonnet/fable 只能匹配 claude-* 行，
+  于是发现的 3P 模型全被拦在 UI 层。
+
+### 修复（L10）
+
+把激活判定 `t.state==="set"` 等长改成永不匹配的 `t.state==="zet"`，门控恒走无限制路径
+`Il()`；同函数的 desktop/CLI 版本门控不受影响。特征串在对应文件中各只有 1 处：
+
+| 版本 | 文件 | offset |
+|---|---|---|
+| 2.2553 | `ion-dist/assets/v1/c360a9e1c-*.js`（`Rl`） | 22886 |
+| 0903 | `ion-dist/assets/v1/c66fe388e-*.js`（`ld`） | — |
+
+> 不改代码的替代方案：把发现的模型 ID 加进 `~/.claude/settings.json` 的 `availableModels`。
+> 但该文件由外部工具维护、模型列表动态变化，patch 方案更省心。
+
+### 验证
+
+- 已安装 App dry-run：L10 命中 `c360a9e1c-GPs-MV9u.js`，其余层 already_applied
+- 临时 App 实 patch：`node --check` 通过、幂等复检 already_applied、`codesign --verify --deep --strict` 通过
+- 0903 DMG dry-run：L10 备选特征码命中 `c66fe388e-DOFZnzRG.js`
+
+---
+
 ## 2026-09-21 — 适配 2.2553.1 + renderer 层补丁（关键修复）
 
 ### 新增：renderer 层补丁（L2d / L9）

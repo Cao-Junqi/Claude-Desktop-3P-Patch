@@ -34,7 +34,7 @@ patch_claude_3p_v2.py
 - 合并中文汉化能力，并让 App 内语言选择器显示"简体中文"；
 - 默认采用 DMG → 临时 App → patch → 验证 的安全流程，只有显式 `--install` 才替换 `/Applications/Claude.app`。
 
-**当前状态**：脚本已适配 0811（Claude Desktop `1.26832.0`），功能为纯 3P patch + 本地恢复 + 中文汉化（汉化已扩到 11664 条补全），无额外注入。已提交至 GitHub `origin/main`（commit `b23aa9e`）。
+**当前状态**：脚本已适配 2.2553.1（0921）与 1.44121.4（0903），功能为纯 3P patch + 本地恢复 + 中文汉化（汉化已扩到 11664 条补全）+ L10 模型选择器门控绕过，无额外注入。
 
 ---
 
@@ -160,8 +160,9 @@ LOCAL_FEATURE_BOOL_KEYS = [
 | L6 | session title fallback | `index.chunk-ChZ67Jhw.js`（两个 catch，其一带 `{title:""}`） |
 | L7 | effort `xhigh` compatibility | 新版 `cwn` 原生排除 xhigh，无需 patch |
 | **L9** | **renderer 语言列表（zh-CN/TW/HK）** | **`ion-dist/assets/v1/shared-2-*.js`（数组 `Am`）** |
+| **L10** | **模型选择器 availableModels 门控绕过** | **`ion-dist/assets/v1/c360a9e1c-*.js`（`Rl` 的 `t.state==="set"` 判定，0903 为 `ld()` 同构）** |
 
-> L2d / L9 是 2026-09-21 新增，针对 `ion-dist`（ASAR 外）。**排查「模型被拦」「语言列表没有中文」时优先看这两层**，见上文「关键结构」。
+> L2d / L9 是 2026-09-21 新增，L10 是 2026-09-30 新增，均针对 `ion-dist`（ASAR 外）。**排查「模型被拦」「语言列表没有中文」「发现的模型在 picker 里灰化」时优先看这三层**，见上文「关键结构」。
 >
 > L2b / L5 / L7 属于「新版原生已处理」，脚本里保留注释说明而非留空。
 
@@ -176,6 +177,7 @@ L2d:  2190, 2714, 2993, 3148, 3341, 3450       (ion-dist ce459c687-*.js)
 L4:   3723488, 3999143, 4007060, 4007989, 4008385
 L6:   3965744, 3966058
 L9:   90040 附近（数组 Am 结尾处）
+L10:  22886                      (ion-dist c360a9e1c-*.js)
 L3b:  3353
 ```
 
@@ -265,6 +267,24 @@ S1=["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt
 - 清理 `README.md` 和 `INSTALL_APPLICATION_PATCH.md`
 
 脚本当前与 GitHub `origin/main` 一致。
+
+---
+
+### 5. 模型选择器 availableModels 过滤（L10，2026-09-30）
+
+症状：模型发现（`/v1/models`）填充的模型选择器里，非 Claude 模型（GPT/Grok/Haiku 等）全部灰化，
+tooltip「不在 你的 Claude Code 设置 设置的 availableModels 中 (~/.claude/settings.json)」，无法选择。
+
+根因：发现本身正常，是 **picker 的 UI 门控**把它们禁用了——渲染进程 `Rl()`（0903 为 `ld()`）在
+设置解析结果带 `availableModels` 时激活 allowlist 门控，行名不匹配的全部灰化。
+本例 `~/.claude/settings.json` 的 `availableModels: ["opus","sonnet","fable"]` 是别名，
+只匹配 claude-* 行，发现的 3P 模型全被拦在 UI 层。
+
+修复：等长把激活判定 `t.state==="set"` 改成永不匹配的 `t.state==="zet"`，门控恒走无限制路径
+`Il()`；同函数的 desktop/CLI 版本门控不受影响。特征串在对应文件中各只有 1 处。
+
+不改代码的替代方案：把发现的模型 ID 加进 `~/.claude/settings.json` 的 `availableModels`；
+但该文件由外部工具维护、模型列表动态变化，patch 方案更省心。
 
 ---
 
