@@ -4,6 +4,43 @@
 
 ---
 
+## 2026-10-01 — L11：会话层模型拒绝修复
+
+### 症状
+
+L10 之后 picker 不再灰化，但选中发现的非 Claude 模型（GLM-5.3 等）提示
+「… is restricted by your organization. Still using Opus 5.5.」，会话回落旧模型。
+
+### 根因
+
+拒绝来自 **CLI 会话本身**（桌面只解析会话输出弹 toast，主进程无任何 entitlement 逻辑）：
+
+- 桌面聊天 spawn 用 `settingSources:["user"]`，CLI 读入 `~/.claude/settings.json` 的
+  `availableModels: ["opus","sonnet","fable"]`（终端别名，只匹配 claude-* 行）；
+- CLI 的 `Fr()` 策略门对白名单外的模型直接拒绝切换；managed 3P 配置没有静态模型列表，
+  user 层成为生效白名单。
+- 终端 CLI `-p` 初始模型不走切换门（实测 GLM 正常），只有桌面会话的切换路径被拦。
+
+### 修复（L11）
+
+等长把两处桌面会话 spawn 的 `settingSources` 改为 `[]`（探针会话本就如此）：
+会话不再读 settings 文件 → 生效白名单为空 → `Fr()` 提前放行所有模型。
+桌面自备 provider env 与完整模型 ID；orca hooks 在桌面会话本就空转。
+特征串不含混淆名，0903 / 2.2553 通用：
+
+| 目标 | 特征串 | offset（2.2553） |
+|---|---|---|
+| 聊天 spawn（DM8UiapT / CvmK1tLJ） | `settingSources:["user"],settings:` → `[],` | 316182 |
+| brokered 会话（l0PS_wmg / CZBa8sWq） | `settingSources:["user","project","local"],includePartialMessages:` → `[]` | 809575 |
+
+### 验证
+
+- dry-run：L11 命中两个 chunk，其余层 already_applied
+- 临时 App：`node --check`（两个被 patch 的 chunk）通过、幂等复检 already_applied、codesign 通过
+- 已安装 /Applications 并重启验证
+
+---
+
 ## 2026-09-30 — L10：模型选择器 availableModels 过滤绕过
 
 ### 症状

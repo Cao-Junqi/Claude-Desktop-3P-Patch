@@ -4,11 +4,14 @@ Claude Desktop 第三方模型解锁 + 中文汉化工具
 
 **当前适配版本**: Claude Desktop `2.2553.1`（构建日 0918；同时支持 `1.44121.4`）
 **汉化翻译**: 自研，24000+ 条专业翻译
-**最后更新**: 2026-09-30
+**最后更新**: 2026-10-01
 
 ---
 
 ## 📋 更新日志
+
+### 2026-10-01 - L11：会话层模型拒绝修复
+- ✅ 新增 **L11**：桌面会话不再继承 `~/.claude/settings.json` 的终端模型白名单 —— 修复选中发现的 3P 模型时提示「restricted by your organization」并回落旧模型
 
 ### 2026-09-30 - L10：模型选择器 availableModels 过滤绕过
 - ✅ 新增 **L10**：模型发现填充的 3P 模型不再被 `~/.claude/settings.json` 的 `availableModels` 灰化（tooltip「不在…availableModels 中」→ 可正常选择）

@@ -161,8 +161,9 @@ LOCAL_FEATURE_BOOL_KEYS = [
 | L7 | effort `xhigh` compatibility | 新版 `cwn` 原生排除 xhigh，无需 patch |
 | **L9** | **renderer 语言列表（zh-CN/TW/HK）** | **`ion-dist/assets/v1/shared-2-*.js`（数组 `Am`）** |
 | **L10** | **模型选择器 availableModels 门控绕过** | **`ion-dist/assets/v1/c360a9e1c-*.js`（`Rl` 的 `t.state==="set"` 判定，0903 为 `ld()` 同构）** |
+| **L11** | **会话 settingSources 隔离（丢弃 user 层模型白名单）** | **`.vite/build/index.chunk-*.js`（聊天 spawn `settingSources:["user"],settings:` + brokered 会话 `settingSources:["user","project","local"]`）** |
 
-> L2d / L9 是 2026-09-21 新增，L10 是 2026-09-30 新增，均针对 `ion-dist`（ASAR 外）。**排查「模型被拦」「语言列表没有中文」「发现的模型在 picker 里灰化」时优先看这三层**，见上文「关键结构」。
+> L2d / L9 是 2026-09-21 新增，L10 是 2026-09-30 新增，L11 是 2026-10-01 新增；L11 针对 ASAR 内主进程。**排查「模型被拦」「语言列表没有中文」「发现的模型在 picker 里灰化」「选中模型提示 restricted by your organization」时优先看这四层**，见上文「关键结构」。
 >
 > L2b / L5 / L7 属于「新版原生已处理」，脚本里保留注释说明而非留空。
 
@@ -178,6 +179,7 @@ L4:   3723488, 3999143, 4007060, 4007989, 4008385
 L6:   3965744, 3966058
 L9:   90040 附近（数组 Am 结尾处）
 L10:  22886                      (ion-dist c360a9e1c-*.js)
+L11:  316182 (index.chunk-DM8UiapT.js), 809575 (index.chunk-l0PS_wmg.js)
 L3b:  3353
 ```
 
@@ -283,8 +285,25 @@ tooltip「不在 你的 Claude Code 设置 设置的 availableModels 中 (~/.cla
 修复：等长把激活判定 `t.state==="set"` 改成永不匹配的 `t.state==="zet"`，门控恒走无限制路径
 `Il()`；同函数的 desktop/CLI 版本门控不受影响。特征串在对应文件中各只有 1 处。
 
-不改代码的替代方案：把发现的模型 ID 加进 `~/.claude/settings.json` 的 `availableModels`；
-但该文件由外部工具维护、模型列表动态变化，patch 方案更省心。
+### 6. 会话层模型拒绝（L11，2026-10-01）
+
+症状：L10 之后 picker 不再灰化，但选中发现的非 Claude 模型（如 GLM-5.3）立刻提示
+「… is restricted by your organization. Still using Opus 5.5.」，会话回落到旧模型。
+
+根因：拒绝来自 **CLI 会话本身**（桌面只解析会话输出并弹 toast）。桌面聊天 spawn 用
+`settingSources:["user"]`，CLI 因此读入 `~/.claude/settings.json` 的
+`availableModels: ["opus","sonnet","fable"]`（终端别名）；CLI 的 `Fr()` 策略门对不在
+白名单的模型直接拒绝模型切换。managed 3P 配置没有静态模型列表（R2n 因此不产出
+availableModels），user 层成为生效白名单。**终端 CLI 不受影响**（`-p` 初始模型不走切换门），
+只有桌面会话的切换路径被拦。
+
+修复（L11）：等长把两处桌面会话 spawn 的 `settingSources:["user"]` /
+`["user","project","local"]` 改为 `[]`（探针会话本来就是 `[]`），会话不再读任何 settings
+文件 → 生效白名单为空 → CLI `Fr()` 提前放行所有模型。桌面自备 provider env 与完整模型 ID，
+不依赖 user 设置（orca hooks 在桌面会话本就是空转）。特征串不含混淆名，0903 / 2.2553 通用。
+
+不改代码的替代方案：往 `~/.claude/settings.json` 的 `availableModels` 里加发现的模型 ID；
+但该文件由 orca/magpie 维护且模型动态变化，且终端语义（限制 /model 选择）会被破坏。
 
 ---
 

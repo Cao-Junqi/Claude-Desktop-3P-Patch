@@ -17,6 +17,9 @@ patches a temporary app and does NOT replace /Applications/Claude.app unless
 Patch layers (see build_index_patch_specs / build_renderer_patch_specs):
 - L1/L2/L2c/L4/L6  main-process bundle (.vite/build/, inside app.asar)
 - L3b              @ant/claude-swift virtualization support
+- L11              main-process session spawns — stop reading user
+                   settings.json so its terminal `availableModels` aliases
+                   stop denying discovered 3P models at model-switch time
 - L2d/L9/L10       renderer bundle (ion-dist/, OUTSIDE app.asar) — model
                    validators, the selectable-language list and the model
                    picker's availableModels allowlist gate. Missing these
@@ -32,6 +35,9 @@ Changes from 0903:
   model discovery fills the picker with non-Claude models, but a resolved
   availableModels (e.g. ~/.claude/settings.json) greys them out as
   "Unavailable"; the gate now always takes its no-restriction path
+- L11 added: desktop sessions stop inheriting the user settings.json model
+  allowlist, fixing "Model '…' is restricted by your organization's settings"
+  when selecting discovered 3P models
 - L2b/L5/L7 remain unnecessary (handled natively by the new builds)
 """
 
@@ -562,6 +568,33 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 # 2.2553: same shape — `cwn` (["low","medium","high","max"]) gates the
                 # request effort and `uwn()` falls back to "medium" (index.chunk-ChZ67Jhw.js),
                 # so xhigh never reaches a 3P model.
+            ],
+        ),
+        (
+            "L11 session settingSources isolation (drop user-tier model allowlist)",
+            [
+                # Desktop-hosted sessions spawned the CLI with settingSources
+                # including "user", so ~/.claude/settings.json leaked into them.
+                # Its `availableModels` (terminal aliases like opus/sonnet/fable)
+                # then gates the CLI's model-switch policy (`Fr`): any discovered
+                # 3P model outside the aliases is denied with "Model '…' is
+                # restricted by your organization's settings" and the session
+                # falls back (L10 only un-greyed the picker rows). The desktop
+                # supplies provider env and full model IDs itself, and the
+                # managed 3P config carries no static model list, so loading no
+                # settings files — exactly what the SDK probe sessions already
+                # do — empties the effective allowlist and every discovered
+                # model passes. `["user"],` (9 bytes) → `[],` + 6 spaces keeps
+                # the ASAR payload layout intact; the needle is identical in
+                # 0903 and 2.2553 (one chat-spawn hit per build).
+                (b'settingSources:["user"],settings:', b'settingSources:[],      settings:', False),
+                # Brokered session variant (permissionBroker/userDialogBroker):
+                # same exposure via the full user/project/local tier list.
+                (
+                    b'settingSources:["user","project","local"],includePartialMessages:',
+                    b'settingSources:[],' + b' ' * 24 + b'includePartialMessages:',
+                    False,
+                ),
             ],
         ),
     ]
