@@ -78,5 +78,5 @@ sudo python3 patch_claude_zhcn_macos_0921.py --user-home "$HOME"
 
 ---
 
-**更新日期**: 2026-09-21
+**更新日期**: 2026-10-05
 **系统要求**: macOS 10.15+

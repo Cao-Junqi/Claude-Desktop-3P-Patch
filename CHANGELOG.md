@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-10-05 — L12：恢复用户技能与斜杠命令
+
+### 症状
+
+L11 之后 3P 模型不再被组织设置拒绝，但 Desktop 的 `/speckit` 等用户斜杠命令
+不再出现候选。`~/.claude/skills` 与 `~/.claude/commands` 本身都在。
+
+### 根因
+
+L11 把桌面会话的 `settingSources` 改为 `[]`，但 SDK 对每个已定义数组都会拼出
+`--setting-sources=`。CLI 把这个显式空来源列表当作权威配置，于是跳过用户技能
+和 legacy commands。
+
+### 修复（L12）
+
+等长把空数组判定从“已定义”收窄为“至少有一个来源”：
+
+| 目标 | 特征串 | offset（2.2553） |
+|---|---|---|
+| SDK CLI 参数拼装（`index.chunk-Bepat7CB.js`） | `C!==void 0&&T.push(...)` → `C?.length&&T.push(...)` | 896472 |
+
+非空来源仍原样传递；只有空数组恢复 CLI 默认加载路径，L11 的模型白名单隔离保持不变。
+
+### 验证
+
+- dry-run：L12 命中 1 处
+- 已安装 `/Applications/Claude.app`：旧特征串 0 处、新特征串 1 处
+- `node --check`、幂等复检 `already_applied`、`codesign --verify --deep --strict` 通过
+- 备份：`/Users/junqi/Library/Application Support/Claude-3P-Backups/Claude-before-l12-20261005-125411.app`
+- 用户侧 `/speckit` 候选显示仍待新 Desktop Code 会话确认
+
+---
+
 ## 2026-10-01 — L11：会话层模型拒绝修复
 
 ### 症状

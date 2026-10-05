@@ -34,7 +34,7 @@ patch_claude_3p_v2.py
 - 合并中文汉化能力，并让 App 内语言选择器显示"简体中文"；
 - 默认采用 DMG → 临时 App → patch → 验证 的安全流程，只有显式 `--install` 才替换 `/Applications/Claude.app`。
 
-**当前状态**：脚本已适配 2.2553.1（0921）与 1.44121.4（0903），功能为纯 3P patch + 本地恢复 + 中文汉化（汉化已扩到 11664 条补全）+ L10 模型选择器门控绕过，无额外注入。
+**当前状态**：脚本已适配 2.2553.1（0921）与 1.44121.4（0903），功能为纯 3P patch + 本地恢复 + 中文汉化（汉化已扩到 11664 条补全）+ L10 模型选择器门控绕过 + L12 用户技能/斜杠命令恢复，无额外注入。
 
 ---
 
@@ -162,8 +162,9 @@ LOCAL_FEATURE_BOOL_KEYS = [
 | **L9** | **renderer 语言列表（zh-CN/TW/HK）** | **`ion-dist/assets/v1/shared-2-*.js`（数组 `Am`）** |
 | **L10** | **模型选择器 availableModels 门控绕过** | **`ion-dist/assets/v1/c360a9e1c-*.js`（`Rl` 的 `t.state==="set"` 判定，0903 为 `ld()` 同构）** |
 | **L11** | **会话 settingSources 隔离（丢弃 user 层模型白名单）** | **`.vite/build/index.chunk-*.js`（聊天 spawn `settingSources:["user"],settings:` + brokered 会话 `settingSources:["user","project","local"]`）** |
+| **L12** | **空 settingSources 不生成 CLI 参数（恢复用户技能与斜杠命令）** | **`.vite/build/index.chunk-Bepat7CB.js`（SDK 参数拼装 `C!==void 0` → `C?.length`）** |
 
-> L2d / L9 是 2026-09-21 新增，L10 是 2026-09-30 新增，L11 是 2026-10-01 新增；L11 针对 ASAR 内主进程。**排查「模型被拦」「语言列表没有中文」「发现的模型在 picker 里灰化」「选中模型提示 restricted by your organization」时优先看这四层**，见上文「关键结构」。
+> L2d / L9 是 2026-09-21 新增，L10 是 2026-09-30 新增，L11 是 2026-10-01 新增，L12 是 2026-10-05 新增；L11 / L12 针对 ASAR 内主进程。**排查「模型被拦」「语言列表没有中文」「发现的模型在 picker 里灰化」「选中模型提示 restricted by your organization」「用户斜杠命令不出现」时优先看这五层**，见上文「关键结构」。
 >
 > L2b / L5 / L7 属于「新版原生已处理」，脚本里保留注释说明而非留空。
 
@@ -180,6 +181,7 @@ L6:   3965744, 3966058
 L9:   90040 附近（数组 Am 结尾处）
 L10:  22886                      (ion-dist c360a9e1c-*.js)
 L11:  316182 (index.chunk-DM8UiapT.js), 809575 (index.chunk-l0PS_wmg.js)
+L12:  896472                    (index.chunk-Bepat7CB.js)
 L3b:  3353
 ```
 
@@ -304,6 +306,18 @@ availableModels），user 层成为生效白名单。**终端 CLI 不受影响**
 
 不改代码的替代方案：往 `~/.claude/settings.json` 的 `availableModels` 里加发现的模型 ID；
 但该文件由 orca/magpie 维护且模型动态变化，且终端语义（限制 /model 选择）会被破坏。
+
+### 7. 用户技能与斜杠命令消失（L12，2026-10-05）
+
+症状：L11 后 3P 模型可切换，但 Desktop 输入 `/speckit` 不再出现用户命令候选。
+`~/.claude/skills`、`~/.claude/commands` 和 `.claude.json` 都存在。
+
+根因：L11 的 `settingSources: []` 仍被 SDK 序列化为显式的 `--setting-sources=`。
+CLI 把空来源列表当作权威配置，不再回退加载用户技能和 legacy commands。
+
+修复（L12）：等长把 `C!==void 0&&T.push(...)` 改为 `C?.length&&T.push(...)`。
+空数组不再传该参数，非空来源保持原行为；模型白名单隔离不受影响。
+2.2553 命中 `index.chunk-Bepat7CB.js`（offset 896472）。
 
 ---
 

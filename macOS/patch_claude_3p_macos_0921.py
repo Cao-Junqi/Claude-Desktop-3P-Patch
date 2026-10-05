@@ -20,6 +20,9 @@ Patch layers (see build_index_patch_specs / build_renderer_patch_specs):
 - L11              main-process session spawns — stop reading user
                    settings.json so its terminal `availableModels` aliases
                    stop denying discovered 3P models at model-switch time
+- L12              SDK CLI argument builder — omit an empty
+                   `--setting-sources=` so Desktop still loads user skills
+                   and slash commands
 - L2d/L9/L10       renderer bundle (ion-dist/, OUTSIDE app.asar) — model
                    validators, the selectable-language list and the model
                    picker's availableModels allowlist gate. Missing these
@@ -38,6 +41,9 @@ Changes from 0903:
 - L11 added: desktop sessions stop inheriting the user settings.json model
   allowlist, fixing "Model '…' is restricted by your organization's settings"
   when selecting discovered 3P models
+- L12 added: an explicitly empty settingSources array no longer becomes
+  `--setting-sources=`, which otherwise disables user skills and slash
+  commands while preserving L11's model-allowlist isolation
 - L2b/L5/L7 remain unnecessary (handled natively by the new builds)
 """
 
@@ -593,6 +599,22 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 (
                     b'settingSources:["user","project","local"],includePartialMessages:',
                     b'settingSources:[],' + b' ' * 24 + b'includePartialMessages:',
+                    False,
+                ),
+            ],
+        ),
+        (
+            "L12 omit empty setting-sources CLI argument",
+            [
+                # L11 makes Desktop pass settingSources: []. The SDK still
+                # emits `--setting-sources=` for every defined array, including
+                # an empty one. The CLI treats that explicit empty source list
+                # as authoritative and skips ~/.claude skills and commands.
+                # Requiring a first element preserves explicit non-empty source
+                # selections while restoring the CLI default for the empty case.
+                (
+                    b'C!==void 0&&T.push(`--setting-sources=${C.join(",")}`)',
+                    b'C?.length&&T.push(`--setting-sources=${C.join(",")}`) ',
                     False,
                 ),
             ],
