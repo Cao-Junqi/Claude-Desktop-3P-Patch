@@ -2,13 +2,22 @@
 
 Claude Desktop 第三方模型解锁 + 中文汉化工具
 
-**当前适配版本**: Claude Desktop `2.2553.1`（构建日 0918；同时支持 `1.44121.4`）
+**当前适配版本**: Claude Desktop `2.31226.1`（同时支持 `2.2553.1` / `1.44121.4`）
 **汉化翻译**: 自研，24000+ 条专业翻译
-**最后更新**: 2026-10-05
+**最后更新**: 2026-10-13
 
 ---
 
 ## 📋 更新日志
+
+### 2026-10-13 - 适配 2.31226.1（L1/L10/L12 更新 + L2d 共享门修复）
+- ✅ **L1**：custom3p helper 校验器改名（`rUt`/`dUt`）—— 更新特征码
+- ✅ **L10**：renderer 模型选择器门控改名（`s=`/`o.some`/`D`）—— 更新特征码
+- ✅ **L12**：SDK 参数拼装改用 `Y7()` helper —— 更新特征码
+- ✅ **L2d 关键修复**：renderer 共享黑名单门 `wt` 改名 `pr`（`fr`/`ur`/`dr`）；首轮 dry-run 假命中，幂等复检暴露，已补新特征码
+- ✅ 其余层原样命中 2.2553 特征码；全部实际层 applied
+- ✅ 验证：`node --check`（ASAR 7 文件 + renderer 3333 文件）、幂等复检、codesign 通过
+- ✅ 已装机：`/Applications/Claude.app`（原版备份 `Claude-backup-2.31226.1.app`）
 
 ### 2026-10-05 - L12：恢复用户技能与斜杠命令
 - ✅ 新增 **L12**：空的 `settingSources` 不再生成 `--setting-sources=` —— 保留 L11 的模型白名单隔离，同时恢复 `~/.claude` 用户技能与斜杠命令
@@ -66,11 +75,12 @@ Claude Desktop 第三方模型解锁 + 中文汉化工具
 Claude-Desktop-3P-Patch/
 │
 ├── macOS/                                    🍎 macOS 平台
-│   ├── patch_claude_3p_macos_0921.py       第三方模型 patch (2.2553.1 最新)
-│   ├── patch_claude_zhcn_macos_0921.py     中文汉化脚本 (2.2553.1 最新)
+│   ├── patch_claude_3p_macos_0921.py       第三方模型 patch (2.31226.1 最新)
+│   ├── patch_claude_zhcn_macos_0921.py     中文汉化脚本 (2.31226.1 最新)
 │   ├── patch_claude_3p_macos_0811.py       第三方模型 patch (0811 旧版)
 │   ├── patch_claude_zhcn_macos.py          中文汉化脚本 (0811 旧版)
 │   ├── resources/                           汉化资源文件
+│   ├── test_31226_summary.md                2.31226.1 测试报告
 │   ├── test_0921_summary.md                 2.2553.1 测试报告
 │   └── README.md                            macOS 使用说明
 │
@@ -150,7 +160,7 @@ python patch_claude_3p_windows_0811.py
 
 | 平台 | 脚本版本 | 适配 Claude 版本 | 状态 | 更新位置 |
 |------|---------|-----------------|------|---------|
-| macOS | 0903 | 2.2553.1 / 1.44121.4 | ✅ 完成 | 本机 Mac |
+| macOS | 0921 | 2.31226.1 / 2.2553.1 / 1.44121.4 | ✅ 完成（已装机） | 本机 Mac |
 | Windows | 0811 | Windows 版 | ⚠️ 待跟进（未适配 2.x） | Windows 机器 |
 
 ---
@@ -185,6 +195,6 @@ python patch_claude_3p_windows_0811.py
 
 ---
 
-**最后更新**: 2026-09-21
+**最后更新**: 2026-10-13
 **维护者**: 项目团队
 **许可**: 内部使用

@@ -34,7 +34,7 @@ patch_claude_3p_v2.py
 - 合并中文汉化能力，并让 App 内语言选择器显示"简体中文"；
 - 默认采用 DMG → 临时 App → patch → 验证 的安全流程，只有显式 `--install` 才替换 `/Applications/Claude.app`。
 
-**当前状态**：脚本已适配 2.2553.1（0921）与 1.44121.4（0903），功能为纯 3P patch + 本地恢复 + 中文汉化（汉化已扩到 11664 条补全）+ L10 模型选择器门控绕过 + L12 用户技能/斜杠命令恢复，无额外注入。
+**当前状态**：脚本已适配 2.31226.1（1013）、2.2553.1（0921）与 1.44121.4（0903），功能为纯 3P patch + 本地恢复 + 中文汉化（汉化已扩到 11664 条补全）+ L10 模型选择器门控绕过 + L12 用户技能/斜杠命令恢复，无额外注入。
 
 ---
 
@@ -43,15 +43,19 @@ patch_claude_3p_v2.py
 | 项 | 值 |
 |---|---|
 | 系统 | macOS |
-| 已验证 Claude Desktop 版本 | `2.2553.1`（构建日 0918） |
-| 上一版本 | `1.44121.4`（0903） |
+| 已验证 Claude Desktop 版本 | `2.31226.1`（1013，已装机） |
+| 上一版本 | `2.2553.1`（构建日 0918） |
 | Bundle ID | `com.anthropic.claudefordesktop` |
 | 3P 主脚本 | `macOS/patch_claude_3p_macos_0921.py` |
 | 汉化脚本 | `macOS/patch_claude_zhcn_macos_0921.py` |
 | 中文资源目录 | `macOS/resources/` |
 | 旧版本脚本 | `macOS/patch_claude_3p_macos_0811.py`、`macOS/patch_claude_zhcn_macos.py` |
 
-> 脚本文件名保留 `0903`（首版适配时的命名），实际同时支持 `1.44121.4` 与 `2.2553.1`：每个 patch 层都保留多版本特征码，逐条尝试。
+> 脚本文件名保留 `0903`（首版适配时的命名），实际同时支持 `1.44121.4`、`2.2553.1` 与 `2.31226.1`：每个 patch 层都保留多版本特征码，逐条尝试。
+>
+> ⚠️ **安装注意（2.31226 起）**：macOS App Management（TCC）会拒绝非授权进程**在 app bundle 内部写文件**
+> （`PermissionError: Operation not permitted`，即便属主是当前用户、`/Applications` 目录可写）。
+> 装机改为 **bundle 级替换**：`/tmp` 内打补丁 + 重签 → `mv` 原版到备份 → `cp -R` 替换 → `xattr -cr`。
 
 ---
 
@@ -145,30 +149,49 @@ LOCAL_FEATURE_BOOL_KEYS = [
 
 ## 3P patch 层说明
 
-当前（`2.2553.1`）已验证的 patch 层。每个层都保留历史版本特征码，按顺序尝试，命中即止：
+当前（`2.31226.1`）已验证的 patch 层。每个层都保留历史版本特征码，按顺序尝试，命中即止：
 
-| 层 | 含义 | 目标文件（2.2553） |
+| 层 | 含义 | 目标文件（2.31226，括号内为 2.2553 旧位置） |
 |---|---|---|
-| L1 | 3P managed config `safeParse` bypass | `index.chunk-ChZ67Jhw.js`（`uOt`/`vOt` 两个 helper） |
-| L2 | model picker empty allowlist bypass | `index.chunk-l0PS_wmg.js`（`hC`） |
+| L1 | 3P managed config `safeParse` bypass | `index.chunk-Cyt2WTko.js`（`rUt`/`dUt` 两个 helper；旧 `ChZ67Jhw.js` 的 `uOt`/`vOt`） |
+| L2 | model picker empty allowlist bypass | `index.chunk-epGqPC4W.js`（`hC`；旧 `l0PS_wmg.js`） |
 | L2b | model picker terminal `some()` bypass | 新版已无此结构，无需 patch |
-| L2c | gateway model route validator bypass | `index.chunk-ChZ67Jhw.js`（`Hxe`/`Uxe`/`Wxe` + 门 `Jo`）、`index.pre.js`（`KS`/`qS`/`JS` + 门 `US`） |
-| **L2d** | **renderer 模型校验器 bypass** | **`ion-dist/assets/v1/ce459c687-*.js`（`Dt`/`Ot`/`kt` + 门 `wt`）** |
+| L2c | gateway model route validator bypass | `index.chunk-Cyt2WTko.js`（`Hxe`/`Uxe`/`Wxe` + 门 `Jo`）、`index.pre.js`（`KS`/`qS`/`JS` + 门 `US`） |
+| **L2d** | **renderer 模型校验器 bypass** | **`ion-dist/assets/v1/c6f6cf4c2-*.js`（门 `pr` + `fr`/`ur`/`dr`，旧 `wt` + `Ct`/`xt`/`St`）** |
 | L3b | `@ant/claude-swift` virtualization support | `node_modules/@ant/claude-swift/js/index.js` |
-| L4 | auto-update forced early return | `index.chunk-ChZ67Jhw.js`（接收器 `K()`，4 处） |
+| L4 | auto-update forced early return | `index.chunk-Cyt2WTko.js`（接收器 `K()`，5 处） |
 | L5 | inference model catalog throw bypass | 新版只做过滤不抛错，无需 patch |
-| L6 | session title fallback | `index.chunk-ChZ67Jhw.js`（两个 catch，其一带 `{title:""}`） |
+| L6 | session title fallback | `index.chunk-Cyt2WTko.js`（两个 catch，其一带 `{title:""}`） |
 | L7 | effort `xhigh` compatibility | 新版 `cwn` 原生排除 xhigh，无需 patch |
-| **L9** | **renderer 语言列表（zh-CN/TW/HK）** | **`ion-dist/assets/v1/shared-2-*.js`（数组 `Am`）** |
-| **L10** | **模型选择器 availableModels 门控绕过** | **`ion-dist/assets/v1/c360a9e1c-*.js`（`Rl` 的 `t.state==="set"` 判定，0903 为 `ld()` 同构）** |
-| **L11** | **会话 settingSources 隔离（丢弃 user 层模型白名单）** | **`.vite/build/index.chunk-*.js`（聊天 spawn `settingSources:["user"],settings:` + brokered 会话 `settingSources:["user","project","local"]`）** |
-| **L12** | **空 settingSources 不生成 CLI 参数（恢复用户技能与斜杠命令）** | **`.vite/build/index.chunk-Bepat7CB.js`（SDK 参数拼装 `C!==void 0` → `C?.length`）** |
+| **L9** | **renderer 语言列表（zh-CN/TW/HK）** | **`ion-dist/assets/v1/shared-50-*.js`（数组 `w_`，旧 `shared-2-*.js` 的 `Am`）** |
+| **L10** | **模型选择器 availableModels 门控绕过** | **`ion-dist/assets/v1/c593f7513-*.js`（`s=t.state==="set"&&o.some(e=>D(e,t.value))?t:void 0`；旧 `c360a9e1c-*.js` 的 `Rl`）** |
+| **L11** | **会话 settingSources 隔离（丢弃 user 层模型白名单）** | **`index.chunk-BCHP6ll9.js` + `index.chunk-QEr06WaZ.js`（聊天 spawn + brokered 会话，特征串跨版本通用）** |
+| **L12** | **空 settingSources 不生成 CLI 参数（恢复用户技能与斜杠命令）** | **`index.chunk-D6Q00DJz.js`（`ee!==void 0&&w.push(Y7("--setting-sources",…))` → `ee?.length`；旧 `Bepat7CB.js` 的 `C!==void 0`）** |
 
 > L2d / L9 是 2026-09-21 新增，L10 是 2026-09-30 新增，L11 是 2026-10-01 新增，L12 是 2026-10-05 新增；L11 / L12 针对 ASAR 内主进程。**排查「模型被拦」「语言列表没有中文」「发现的模型在 picker 里灰化」「选中模型提示 restricted by your organization」「用户斜杠命令不出现」时优先看这五层**，见上文「关键结构」。
 >
 > L2b / L5 / L7 属于「新版原生已处理」，脚本里保留注释说明而非留空。
+>
+> ⚠️ 2026-10-13 适配 2.31226 时发现 **L2d 会「假 applied」**：dry-run 报 applied 的只是兜底分支
+> （Bedrock/Vertex reason 字符串），真正的共享门改名后特征串不匹配。**dry-run 必须配合幂等复检**
+> （对已 patch App 重跑，应全部 `already_applied`），否则会漏掉关键门层。
 
-2.2553 实测 offsets（仅用于排查，不作为 patch 定位依据）：
+2.31226 实测 offsets（仅用于排查，不作为 patch 定位依据）：
+
+```text
+L1:   2114065, 2116202            (index.chunk-Cyt2WTko.js)
+L2:   516388                      (index.chunk-epGqPC4W.js)
+L2c:  537381                      (index.chunk-Cyt2WTko.js)
+      334222                      (index.pre.js)
+L2d:  2843 (门 pr), 3646, 3367    (ion-dist c6f6cf4c2-*.js)
+L4:   3922471, 4292127, 4305289, 4314802, 4315848, 4316814
+L6:   4261777, 4262091
+L9:   105047 附近（数组 w_ 结尾处）
+L10:  21206                       (ion-dist c593f7513-*.js)
+L11:  1490161 (index.chunk-BCHP6ll9.js), 362859 (index.chunk-QEr06WaZ.js)
+L12:  1108353                     (index.chunk-D6Q00DJz.js)
+L3b:  3372
+```
 
 ```text
 L1:   2202100, 2204237          (index.chunk-ChZ67Jhw.js)
@@ -318,6 +341,24 @@ CLI 把空来源列表当作权威配置，不再回退加载用户技能和 leg
 修复（L12）：等长把 `C!==void 0&&T.push(...)` 改为 `C?.length&&T.push(...)`。
 空数组不再传该参数，非空来源保持原行为；模型白名单隔离不受影响。
 2.2553 命中 `index.chunk-Bepat7CB.js`（offset 896472）。
+
+### 8. 2.31226.1 适配 + 正式 App 重装（2026-10-13）
+
+首次 dry-run 失效 3 层，另发现 1 层「假 applied」：
+
+| 层 | 变化 | 新特征码要点 |
+|---|---|---|
+| L1 | helper 校验器改名 | `rUt`（clientSecretHelper strict）/ `dUt`（envHelper record），`safeParse+throw` 结构不变 → 伪造成功（`index.chunk-Cyt2WTko.js` 2114065/2116202） |
+| L10 | picker 门控局部变量改名 | `s=t.state==="set"&&o.some(e=>D(e,t.value))?t:void 0` → `"zet"`（`c593f7513-*.js` 21206） |
+| L12 | SDK 参数拼装改用 `Y7()` helper | `ee!==void 0&&w.push(Y7("--setting-sources",ee.join(",")))` → `ee?.length &&…`（`D6Q00DJz.js` 1108353） |
+| **L2d** | **共享黑名单门改名（隐蔽！）** | 门 `wt`→`pr`，正则/列表 `Ct`/`xt`/`St`→`fr`/`ur`/`dr`；**只补兜底分支时 dry-run 也报 applied**，必须靠幂等复检发现 |
+
+装机：App Management 禁止在 bundle 内写文件 → 改为 `/tmp` 内 patch+重签后 **bundle 级替换**
+（备份 `Claude-backup-2.31226.1.app`）。验证：dry-run 全 applied（L2b/L7 除外）、
+`node --check`（ASAR 7 文件 + renderer 3333 文件）、幂等全 `already_applied`、codesign OK、
+启动稳定 + `deploymentMode:3p`。
+
+> **教训**：适配新版时，dry-run「applied」不代表该层真的打到了关键门 —— 一定要做幂等复检。
 
 ---
 

@@ -4,6 +4,72 @@
 
 ---
 
+## 2026-10-13 — 适配 Claude Desktop 2.31226.1 + 正式 App 重装
+
+### 版本
+
+- 新版：`2.31226.1`（本机 `/Applications` 官方安装版，直接复制到 `/tmp` 分析）
+- 上一版：`2.2553.1`（0918）
+- 脚本：`patch_claude_3p_macos_0921.py`（继续沿用，追加 2.31226 特征码）
+
+### 初测失效层（3 层）
+
+| 层 | 旧特征串为何失效 | 2.31226 新位置 / 新形态 |
+|---|---|---|
+| L1 | 两个 custom3p helper 校验器改名（`uOt`/`vOt` → `rUt`/`dUt`） | `index.chunk-Cyt2WTko.js`（2114065, 2116202） |
+| L10 | renderer 模型选择器门控局部变量改名（`o=`/`n.some`/`q` → `s=`/`o.some`/`D`） | `ion-dist/assets/v1/c593f7513-DQShcHgn.js`（21206） |
+| L12 | SDK 参数拼装改用 `Y7()` helper 包装（`T.push(\`--setting-sources=…\`)` → `w.push(Y7("--setting-sources",ee.join(",")))`） | `index.chunk-D6Q00DJz.js`（1108353） |
+
+### 初测漏掉的隐患：L2d 共享门改名
+
+首轮 dry-run 显示 L2d「applied ×2」，但**幂等复检报 missing** —— 说明命中的只是两条兜底分支
+（Bedrock / Vertex 的 reason 字符串），真正的共享黑名单门 `wt` 已改名 `pr`（黑名单/白名单/列表
+局部变量同步改为 `fr`/`ur`/`dr`），旧特征串完全没匹配到。若不补，renderer 仍会拦 minimax/glm/
+deepseek 等 3P 模型名。已追加新门特征码（同样 pin `t` 到 `` `claude` ``）：
+
+```
+function pr(e){let t=e.toLowerCase();return fr.test(t)?!1:ur.test(t)||dr.some(e=>t.includes(e))}
+```
+
+并在 `RENDERER_VALIDATOR_NEEDLES` 增加前/后置检测串，恢复幂等性。
+
+### 其余层原样命中 2.2553 特征码
+
+L2（`index.chunk-epGqPC4W.js` 516388）、L2c（`index.chunk-Cyt2WTko.js` 537381 + `index.pre.js` 334222）、
+L4（5 处）、L6（2 处）、L11（`index.chunk-BCHP6ll9.js` 1490161 + `index.chunk-QEr06WaZ.js` 362859）、
+L3b（3372）、L9（`shared-50-Bmc9oUMm.js` 105047）、L2d 兜底分支。L2b / L5 / L7 依旧原生已处理。
+
+### 验证
+
+- dry-run：全部实际层 applied（L2b/L7 属已知不需要），无 ambiguous
+- `node --check`：ASAR 内 7 个被 patch 文件 + renderer 3333 个 JS 全部通过
+- 幂等复检：对已 patch App 重跑，全部 `already_applied`；语言数组无重复项
+- `codesign --verify`：OK；`ElectronAsarIntegrity` 已更新；entitlements 保持 virtualization/allow_jit
+- 装机：App 从 `/Applications` 启动，主进程稳定运行 ≥1 分钟，无崩溃报告，renderer 以 `--lang=zh-CN` 启动，
+  managed config 显示 `deploymentMode:3p`
+
+### 安装方式变化（重要）
+
+macOS App Management（TCC）会拒绝**非授权进程写入 app bundle 内部**（`Operation not permitted`，
+即使属主是当前用户、`/Applications` 目录可写）。因此本次改为 **bundle 级替换**（与 SOP 流程 1 一致）：
+
+```bash
+mv /Applications/Claude.app /Applications/Claude-backup-2.31226.1.app
+cp -R /tmp/claude-new-test/Claude.app /Applications/Claude.app   # 已在 /tmp 内 patch + 重签 + 验证
+xattr -cr /Applications/Claude.app
+```
+
+原版备份保留在 `/Applications/Claude-backup-2.31226.1.app`（另有更早的
+`/Applications/Claude.backup-before-3p-v2-20260921-171748.app` 未动）。
+
+### 汉化
+
+- 硬编码字符串：810 处替换（245 个文件）
+- 前端 locale merge：16058 translated / 17900 fallback / 7706 extra old keys ignored
+  （2.31226 的 en-US 文案基数进一步增大，fallback 属新增内容，非回归）
+
+---
+
 ## 2026-10-05 — L12：恢复用户技能与斜杠命令
 
 ### 症状

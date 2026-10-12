@@ -4,7 +4,7 @@
 > 技术细节（patch 层、常量、函数）看 [AGENTS.md](AGENTS.md)；操作流程看 [SOP.md](SOP.md)；变更历史看 [CHANGELOG.md](CHANGELOG.md)。
 > 本文件回答"这个项目做过什么、记录在哪、下一步该干嘛"。
 >
-> 最后更新：2026-08-11（0811 适配 + 汉化补全完成，已提交 GitHub 后时点）
+> 最后更新：2026-10-13（2.31226.1 适配 + 正式 App 重装完成）
 
 ---
 
@@ -28,7 +28,7 @@ macOS Claude Desktop 的本地补丁脚本，把 3P / Gateway 模式下的模型
 - 汉化辅助：`patch_claude_zh_cn.py` + `resources/`（frontend-zh-CN.json 24019 key）
 - 翻译管线：`translations/`（批次文件 + `check_and_merge.py`）
 - 默认安全流程：`DMG → 临时 App → patch → 验证`，只有显式 `--install` 才替换 `/Applications/Claude.app`
-- 当前适配版本：`1.26832.0`（0811 构建，已 patch 并提交）
+- 当前适配版本：`2.31226.1`（2.2553.1 / 1.44121.4 的补丁层保留为 fallback）
 
 ---
 
@@ -111,14 +111,31 @@ SkillHub 是一次失败的注入实验（面板有全局显示 bug，且依赖�
 
 ---
 
-## 4. 当前状态与待办（截至 2026-10-05）
+## 4. 当前状态与待办（截至 2026-10-13）
+
+### 2.31226.1 适配 + 正式 App 重装（已完成）
+
+- **版本**：`2.31226.1`（本机 `/Applications` 官方安装版；复制到 `/tmp` 分析，未用 DMG）。
+- **失效层**：L1（helper 校验器改名 `rUt`/`dUt`）、L10（picker 门控改名 `s=`/`o.some`/`D`）、
+  L12（SDK 参数拼装改用 `Y7()`）—— 均已追加新特征码。
+- **隐蔽坑**：**L2d 假 applied** —— 首轮 dry-run 报 applied ×2（实为兜底分支），共享黑名单门
+  `wt`→`pr`（`fr`/`ur`/`dr`）改名后旧特征串完全不匹配；**幂等复检暴露**后已补新门特征码 +
+  检测 needle。若不补，renderer 仍会拦 minimax/glm/deepseek 等 3P 模型名。
+- **其余层**：L2/L2c/L4/L6/L11/L3b/L9 原样命中 2.2553 特征码；L2b/L5/L7 仍原生已处理。
+- **验证**：dry-run 全 applied、`node --check`（ASAR 7 文件 + renderer 3333 文件）、
+  幂等全 `already_applied`、codesign OK、启动稳定（`deploymentMode:3p`、`--lang=zh-CN`）。
+- **装机方式变化（重要）**：macOS App Management 拒绝非授权进程在 app bundle 内写文件
+  （`PermissionError: Operation not permitted`，`/Applications` 目录可写也没用）→ 改为
+  `/tmp` 内 patch+重签 + **bundle 级替换**。原版备份
+  `/Applications/Claude-backup-2.31226.1.app`（另有更早的 20260921 备份未动）。
+- 详见 CHANGELOG.md「2026-10-13」、`macOS/test_31226_summary.md`。
 
 ### L12 用户命令恢复（脚本已落地，候选显示待确认）
 
 - **症状**：L11 后 `/speckit` 等用户斜杠命令不出现候选。
 - **根因**：`settingSources: []` 被 SDK 变成显式 `--setting-sources=`，CLI 因此跳过用户技能与命令。
 - **修复**：新增 L12，等长改为仅在来源数组非空时传递该参数。
-- **命中**：`index.chunk-Bepat7CB.js`，offset `896472`。
+- **命中**：2.2553 `index.chunk-Bepat7CB.js`（896472）；2.31226 `index.chunk-D6Q00DJz.js`（1108353）。
 - **已安装验证**：旧特征串 0 处、新特征串 1 处；`node --check`、幂等复检、codesign 通过。
 - **剩余确认**：新 Desktop Code 会话中输入 `/speckit`，确认候选出现。
 
@@ -147,13 +164,15 @@ SkillHub 是一次失败的注入实验（面板有全局显示 bug，且依赖�
 
 ### 待办 / 观察项
 
-1. **汉化补全（12110 条）**：2.2553 的 `en-US.json` 增至 29442 key（较 0903 新增 6683），
-   当前 24019 条翻译覆盖 17332/29442。补齐流程见 `translations/README.md`，
-   属新增内容而非回归（0903 时缺 6107）。
+1. **汉化补全**：2.31226 的前端 merge 为 16058 translated / **17900 fallback**（2.2553 时 12110）。
+   `en-US` 文案基数每版都在增大，fallback 属新增内容而非回归。补齐流程见 `translations/README.md`。
 2. **Windows 版本未跟进 2.x**：`Windows/patch_claude_3p_windows_0811.py` 仍是 0811 时代，
    且同样只扫 ASAR。适配时**务必一并检查 Windows 的 renderer 目录**。
 3. **userscripts/ 未纳入 git**：`agent-reach-cookie-helper.user.js`（v4）是 git 未跟踪的小工具（cookie helper，与本项目无关）。决定是否入库或移除。
-4. **下次新版适配**：按 [SOP.md](SOP.md)「流程 2」执行；步骤 4 已补「必须同时扫描 `ion-dist`」。
+4. **旧备份清理**：`/Applications/Claude.backup-before-3p-v2-20260921-171748.app`（2.2553 前的
+   0903 版）与 `Claude-backup-2.31226.1.app` 各约 900MB，确认新版稳定后可自行删除。
+5. **下次新版适配**：按 [SOP.md](SOP.md)「流程 2」执行；步骤 4 已补「必须同时扫描 `ion-dist`」，
+   步骤 6 的**幂等复检是硬性要求**（2.31226 的 L2d 假 applied 就是靠它发现的）。
 
 ---
 
@@ -167,3 +186,12 @@ SkillHub 是一次失败的注入实验（面板有全局显示 bug，且依赖�
 6. **官方云端能力本地 patch 不到**：marketplace banner / 订阅内容 / connectors 是服务端 gated，本地只做 UI / flag / validator / updater / local extension 恢复。
 7. **油猴脚本读不到 HttpOnly cookie**：`document.cookie` 永远读不到 `auth_token`/`reddit_session` 这类认证 cookie，必须用 `GM_cookie`。
 8. **安装到 `/Applications` 是高影响操作**：除非用户明确要求，只 patch 临时 App。
+9. **App Management 拦 bundle 内写入（2.31226 起）**：非授权进程写 `/Applications/Claude.app/Contents/**`
+   会 `PermissionError: Operation not permitted`（属主/目录权限都正常也不行）。装机走 bundle 级替换：
+   `/tmp` 内 patch+重签 → `mv` 原版到备份 → `cp -R` 替换 → `xattr -cr`。
+10. **dry-run「applied」≠ 关键门已补（2.31226 教训）**：一个层有多条 alternatives 时，兜底分支命中也会
+    报 applied（L2d 只补了 Bedrock/Vertex 的 reason 串，共享门 `wt`→`pr` 改名后根本没人打）。
+    适配新版必须做**幂等复检**：对已 patch App 重跑，应全部 `already_applied`。
+11. **ASAR 内文件手工提取要对齐偏移**：file data 起点是 `8 + header pickle size`（即 `8 + data[4:8]`），
+    不是 `16 + data[12:16]`（那会错 1 字节的 pickle padding，JS 文件会以垃圾字节开头、`node --check` 假报错）。
+    脚本内部 `patch_asar()` 用的是正确偏移。

@@ -3,7 +3,7 @@
 ## 📦 脚本说明
 
 ### 1. patch_claude_3p_macos_0921.py ⭐️ 最新
-**适配版本**: Claude Desktop `2.2553.1`（构建日 0918）+ `1.44121.4`（0903）
+**适配版本**: Claude Desktop `2.31226.1` + `2.2553.1`（0918）+ `1.44121.4`（0903）
 **功能**: 第三方模型解锁（Gateway / OpenAI / Azure / 自定义模型）+ 禁用自动更新 + 本地能力恢复 + 可选汉化
 
 **使用方法**:
@@ -21,15 +21,19 @@ sudo python3 patch_claude_3p_macos_0921.py \
   --provider gateway --feature-recovery --zh-cn
 ```
 
-**2.2553.1 更新内容**:
-- **新增 L2d**：渲染进程（`ion-dist`）的模型校验器。此前只补主进程，导致 Settings 仍报
-  `Doesn't look like an Anthropic model: 需要一个引用 Anthropic 模型的网关模型路由…`
-- **新增 L9**：渲染进程的语言列表数组。此前 `zh-CN.json` 已装好但下拉框里没有中文。
-- L1 / L2 / L2c / L4 / L6 更新特征码（变量名与接收器变化）。
-- L2b / L5 / L7 在新版原生已处理，无需 patch。
+> ⚠️ macOS App Management（TCC）会拒绝非授权进程**在 app bundle 内部写文件**（`Operation not permitted`）。
+> 若上面命令报 `PermissionError`，改为 bundle 级替换：先把 App 复制到 `/tmp` 打补丁 + 重签，
+> 再 `mv` 原版到备份、`cp -R` 替换（见 `test_31226_summary.md`「安装记录」）。
+
+**2.31226.1 更新内容**:
+- L1（helper 校验器改名 `rUt`/`dUt`）、L10（picker 门控改名 `s=`/`o.some`/`D`）、
+  L12（SDK 参数拼装改用 `Y7()`）更新特征码。
+- **L2d 关键修复**：renderer 共享黑名单门 `wt` 改名 `pr`（黑名单/白名单/列表 `fr`/`ur`/`dr`）。
+  首轮 dry-run 因兜底分支命中而「假 applied」，幂等复检才暴露 —— 已补新门特征码。
+- 其余层原样命中 2.2553 特征码；L2b / L5 / L7 在新版原生已处理，无需 patch。
 
 ### 2. patch_claude_zhcn_macos_0921.py ⭐️ 最新
-**适配版本**: Claude Desktop `2.2553.1` + `1.44121.4`
+**适配版本**: Claude Desktop `2.31226.1` + `2.2553.1` + `1.44121.4`
 **功能**: 完整中文汉化
 **翻译条目**: 24019 条（自研翻译）
 

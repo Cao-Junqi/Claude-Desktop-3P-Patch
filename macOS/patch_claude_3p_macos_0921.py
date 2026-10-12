@@ -4,11 +4,11 @@
 Claude Desktop 3P patcher (0921)
 ================================
 
-Patches Claude Desktop 2.2553.1 (built 0918) and 1.44121.4 (0903) for
-3P/Cowork compatibility. Can patch an installed Claude.app or copy Claude.app
-from a DMG into a temporary workspace, apply compatibility patches, recalculate
-ASAR integrity, re-sign the app, and emit a capability report for 3P
-deployments.
+Patches Claude Desktop 2.31226.1 (1013), 2.2553.1 (built 0918) and
+1.44121.4 (0903) for 3P/Cowork compatibility. Can patch an installed
+Claude.app or copy Claude.app from a DMG into a temporary workspace, apply
+compatibility patches, recalculate ASAR integrity, re-sign the app, and emit
+a capability report for 3P deployments.
 
 Default behavior is conservative: when --dmg/--from-dmg is used, the script
 patches a temporary app and does NOT replace /Applications/Claude.app unless
@@ -45,6 +45,12 @@ Changes from 0903:
   `--setting-sources=`, which otherwise disables user skills and slash
   commands while preserving L11's model-allowlist isolation
 - L2b/L5/L7 remain unnecessary (handled natively by the new builds)
+
+Changes from 2.2553:
+- L1/L10/L12 updated for 2.31226 (helper validators renamed rUt/dUt, picker
+  gate renamed s/o/D, SDK arg builder wraps flag+value in Y7())
+- Everything else matched 2.2553 signatures unchanged (L2/L2c/L4/L6/L11,
+  L2d/L9, L3b)
 """
 
 from __future__ import annotations
@@ -385,6 +391,21 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                     pad_bytes(b'let l={data:c,success:1};if(0)throw', len(b'let l=vOt.safeParse(c);if(!l.success)throw')),
                     False,
                 ),
+                # 2.31226: the two custom3p helper validators moved to
+                # index.chunk-Cyt2WTko.js and were renamed once more — rUt is
+                # the strict clientSecretHelper schema, dUt the envHelper
+                # record schema; the safeParse + throw guard shape is
+                # unchanged, so the same fake-success bypass applies.
+                (
+                    b'let i=rUt.safeParse(r);if(!i.success)throw',
+                    pad_bytes(b'let i={data:r,success:1};if(0)throw', len(b'let i=rUt.safeParse(r);if(!i.success)throw')),
+                    False,
+                ),
+                (
+                    b'let l=dUt.safeParse(c);if(!l.success)throw',
+                    pad_bytes(b'let l={data:c,success:1};if(0)throw', len(b'let l=dUt.safeParse(c);if(!l.success)throw')),
+                    False,
+                ),
             ],
         ),
         (
@@ -617,6 +638,16 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                     b'C?.length&&T.push(`--setting-sources=${C.join(",")}`) ',
                     False,
                 ),
+                # 2.31226: the SDK arg builder moved to index.chunk-D6Q00DJz.js
+                # and now wraps flag + value in the Y7() helper; the source
+                # array is `ee` and the push target `w`. Same `!==void 0` gate,
+                # same fix: require a first element (`ee` (2) + `?.length` (8)
+                # + space keeps the 13-byte `ee!==void 0&&` region equal).
+                (
+                    b'ee!==void 0&&w.push(Y7("--setting-sources",ee.join(",")))',
+                    b'ee?.length &&w.push(Y7("--setting-sources",ee.join(",")))',
+                    False,
+                ),
             ],
         ),
     ]
@@ -686,6 +717,9 @@ RENDERER_VALIDATOR_NEEDLES = (
     b'expected a gateway model route referencing an Anthropic model',
     b'function wt(e){let t=e.toLowerCase();return Ct.test(t)?!1',
     b'function wt(e){let t=`claude`',  # already patched
+    # 2.31226: the shared gate moved to `pr` with renamed regex/list locals.
+    b'function pr(e){let t=e.toLowerCase();return fr.test(t)?!1',
+    b'function pr(e){let t=`claude`',  # already patched
 )
 RENDERER_LOCALE_NEEDLES = (
     # Prefix only (no closing bracket): stays matchable after the languages are
@@ -702,6 +736,10 @@ RENDERER_ALLOWLIST_NEEDLES = (
     # differ per version, so the per-version full strings live in the specs.
     b't.state==="set"&&n.some(e=>',
     b't.state==="zet"&&n.some(e=>',  # already patched
+    # 2.31226: same gate, renamed locals (`s` selector, `o` row ids, `D`
+    # matcher).
+    b't.state==="set"&&o.some(e=>',
+    b't.state==="zet"&&o.some(e=>',  # already patched
 )
 
 
@@ -731,6 +769,13 @@ def build_renderer_allowlist_patch_specs() -> list[tuple[str, list[tuple[bytes, 
                     b'a=t.state==="zet"&&n.some(e=>G(e,t.value))?t:void 0',
                     False,
                 ),
+                # 2.31226: Zu() in c593f7513-*.js — same gate, renamed locals
+                # (`s` selector, `o` row ids, `D` matcher).
+                (
+                    b's=t.state==="set"&&o.some(e=>D(e,t.value))?t:void 0',
+                    b's=t.state==="zet"&&o.some(e=>D(e,t.value))?t:void 0',
+                    False,
+                ),
             ],
         ),
     ]
@@ -751,6 +796,14 @@ def build_renderer_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, boo
                 (
                     b'function wt(e){let t=e.toLowerCase();return Ct.test(t)?!1:xt.test(t)||St.some(e=>t.includes(e))}',
                     b'function wt(e){let t=`claude`,____=e;return Ct.test(t)?!1:xt.test(t)||St.some(e=>t.includes(e))}',
+                    False,
+                ),
+                # 2.31226: same gate renamed to pr, with blacklist/whitelist/list
+                # locals renamed (fr/ur/dr). Pinning t to `claude` (whitelisted
+                # by ur) keeps the validators' happy path.
+                (
+                    b'function pr(e){let t=e.toLowerCase();return fr.test(t)?!1:ur.test(t)||dr.some(e=>t.includes(e))}',
+                    b'function pr(e){let t=`claude`,____=e;return fr.test(t)?!1:ur.test(t)||dr.some(e=>t.includes(e))}',
                     False,
                 ),
                 # Per-provider validators: Dt=Foundry, Ot=Anthropic, kt=gateway.
