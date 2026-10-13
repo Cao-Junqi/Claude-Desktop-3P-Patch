@@ -113,6 +113,19 @@ SkillHub 是一次失败的注入实验（面板有全局显示 bug，且依赖�
 
 ## 4. 当前状态与待办（截至 2026-10-13）
 
+### L13 模型白名单修复（已装机）
+
+- **症状**：选发现的 3P 模型提示 `… is restricted by your organization('s settings) …`，会话继续用旧模型。
+- **根因**：L12 不带 `--setting-sources` → CLI 默认加载 `~/.claude/settings.json`（技能同源，实测无法解耦）；
+  用户 settings 的 `availableModels: ["opus","sonnet","fable"]` 成为生效白名单；桌面 `ZBt()` 仅当部署配置带
+  `inferenceModels` 才下发白名单，本机生效配置（"magpie"）没有 → 用户层白名单无人覆盖。
+- **修复（L13）**：`ZBt()` 改从 `resolvedModels()` 构造白名单（admin 清单优先，否则发现列表；排除 restricted/updateRequired），
+  等长替换 `index.chunk-Cyt2WTko.js` offset 2085214。CLI 始终从 policy 层拿白名单。
+- **验证**：真机 CLI 探针（`--setting-sources=user`/无参 → denied；managed availableModels → 放行；`[1m]` 前缀放行）+
+  补丁前后真函数单测 + `node --check` + 幂等 20/7 全 `already_applied` + codesign + 装机启动。
+- **装机**：bundle 级替换（App Management 禁止 bundle 内写入）；旧补丁版移至 `/tmp/Claude-preL13.app`，
+  原版备份仍在 `/Applications/Claude-backup-2.31226.1.app`。
+
 ### 2.31226.1 适配 + 正式 App 重装（已完成）
 
 - **版本**：`2.31226.1`（本机 `/Applications` 官方安装版；复制到 `/tmp` 分析，未用 DMG）。

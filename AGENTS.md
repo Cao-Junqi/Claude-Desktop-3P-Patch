@@ -167,6 +167,7 @@ LOCAL_FEATURE_BOOL_KEYS = [
 | **L10** | **模型选择器 availableModels 门控绕过** | **`ion-dist/assets/v1/c593f7513-*.js`（`s=t.state==="set"&&o.some(e=>D(e,t.value))?t:void 0`；旧 `c360a9e1c-*.js` 的 `Rl`）** |
 | **L11** | **会话 settingSources 隔离（丢弃 user 层模型白名单）** | **`index.chunk-BCHP6ll9.js` + `index.chunk-QEr06WaZ.js`（聊天 spawn + brokered 会话，特征串跨版本通用）** |
 | **L12** | **空 settingSources 不生成 CLI 参数（恢复用户技能与斜杠命令）** | **`index.chunk-D6Q00DJz.js`（`ee!==void 0&&w.push(Y7("--setting-sources",…))` → `ee?.length`；旧 `Bepat7CB.js` 的 `C!==void 0`）** |
+| **L13** | **CLI 模型白名单改从 `resolvedModels()` 下发（policy 层覆盖用户层）** | **`index.chunk-Cyt2WTko.js` 的 `ZBt()`（`e.models?.list…` → `W().resolvedModels(W().discoveredModels)…`，offset 2085214）** |
 
 > L2d / L9 是 2026-09-21 新增，L10 是 2026-09-30 新增，L11 是 2026-10-01 新增，L12 是 2026-10-05 新增；L11 / L12 针对 ASAR 内主进程。**排查「模型被拦」「语言列表没有中文」「发现的模型在 picker 里灰化」「选中模型提示 restricted by your organization」「用户斜杠命令不出现」时优先看这五层**，见上文「关键结构」。
 >
@@ -175,6 +176,12 @@ LOCAL_FEATURE_BOOL_KEYS = [
 > ⚠️ 2026-10-13 适配 2.31226 时发现 **L2d 会「假 applied」**：dry-run 报 applied 的只是兜底分支
 > （Bedrock/Vertex reason 字符串），真正的共享门改名后特征串不匹配。**dry-run 必须配合幂等复检**
 > （对已 patch App 重跑，应全部 `already_applied`），否则会漏掉关键门层。
+>
+> ⚠️ **L12 的副作用与 L13 的关系（重要认知）**：实测 CLI 在**不带 `--setting-sources`** 时
+> 会按默认加载用户级 settings（`~/.claude/settings.json`），只有显式 `--setting-sources=` 才不加载；
+> 而用户技能/命令与用户设置**同源**（显式空 → 技能消失），无法用 sources 解耦。
+> 因此 L12（恢复技能）会顺带恢复用户层 `availableModels` 的模型限制，
+> 由 **L13** 在 managed settings（policy 层）下发白名单来覆盖。**排查「模型被 org 拒绝」先看 L13。**
 
 2.31226 实测 offsets（仅用于排查，不作为 patch 定位依据）：
 
@@ -359,6 +366,24 @@ CLI 把空来源列表当作权威配置，不再回退加载用户技能和 leg
 启动稳定 + `deploymentMode:3p`。
 
 > **教训**：适配新版时，dry-run「applied」不代表该层真的打到了关键门 —— 一定要做幂等复检。
+
+### 9. 模型切换被 org 设置拒绝（L13，2026-10-13）
+
+症状：2.31226 装机后选择发现的 3P 模型（`gemini-3.8-flash-high`、`anthropic/magpie-*`）提示
+`… is restricted by your organization('s settings) …`，会话继续用旧模型。
+
+根因链（真机 CLI 探针验证）：
+
+1. **L12 副作用**：不带 `--setting-sources` 时 CLI 默认加载用户级 settings（技能同源，无法用 sources 解耦）。
+2. 用户 `~/.claude/settings.json` 有 `availableModels: ["opus","sonnet","fable"]`（orca 终端别名）→ CLI 切换门拒绝一切网关模型。
+3. 桌面 3P 本应在 managed settings（policy 层）下发 `availableModels` 覆盖它，但 `ZBt()` 依赖
+   部署配置的 `inferenceModels`；本机生效配置（"magpie"）没有该字段（走 discovery）→ 未下发 → 用户层生效。
+
+修复（L13）：`ZBt()` 白名单改从 `resolvedModels()` 构造（已内置「admin 清单优先、否则发现列表」+ `restricted`/`updateRequired` 标记），
+等长替换 `index.chunk-Cyt2WTko.js` offset 2085214。
+
+验证：探针复现/放行矩阵 + 补丁前后真函数单测 + `node --check` + 幂等 + 装机启动。
+详见 CHANGELOG.md「2026-10-13 L13」。
 
 ---
 

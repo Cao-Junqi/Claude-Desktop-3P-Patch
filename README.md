@@ -10,6 +10,11 @@ Claude Desktop 第三方模型解锁 + 中文汉化工具
 
 ## 📋 更新日志
 
+### 2026-10-13 - L13：修复「模型被 org 设置拒绝」（restricted by your organization）
+- ✅ 新增 **L13**：CLI 模型白名单改由桌面在 managed settings（policy 层）下发（部署清单优先、否则发现列表）—— 用户终端 `availableModels` 不再限制桌面会话
+- ✅ 根因：L12（空 sources 不传参）使 CLI 默认加载 `~/.claude/settings.json`；桌面 `ZBt()` 仅在配置带 `inferenceModels` 时才下发白名单，本机生效配置没有，于是用户白名单生效
+- ✅ 验证：真机 CLI 探针复现/放行矩阵 + 补丁前后真函数单测 + `node --check` + 幂等 + codesign
+
 ### 2026-10-13 - 适配 2.31226.1（L1/L10/L12 更新 + L2d 共享门修复）
 - ✅ **L1**：custom3p helper 校验器改名（`rUt`/`dUt`）—— 更新特征码
 - ✅ **L10**：renderer 模型选择器门控改名（`s=`/`o.some`/`D`）—— 更新特征码

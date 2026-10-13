@@ -4,6 +4,69 @@
 
 ---
 
+## 2026-10-13 — L13：模型切换被「restricted by your organization's settings」拒绝（2.31226 适配补丁）
+
+### 症状
+
+装机 2.31226 后，在 Desktop 里选择发现的 3P 模型（如 `gemini-3.8-flash-high`）时弹出：
+
+```
+Gemini 3 Flash is restricted by your organization. Still using gemini-3.8-flash-high.
+Model "anthropic/magpie-7415751889" is restricted by your organization's settings. Using claude-opus-5-5[1m] instead.
+```
+
+会话实际仍跑旧模型；主进程日志同时有
+`[resolveCodeSessionModel] warm_session: model "…" rejected (not_in_allowed_models)`。
+
+### 根因（用真机 CLI 探针逐条验证）
+
+1. **L12 的副作用**：L11 把 `settingSources` 置空、L12 又改成「空数组不传 `--setting-sources`」。
+   实测证明：**CLI 不带该参数时按默认行为加载用户级 settings**（`~/.claude/settings.json`），
+   只有显式 `--setting-sources=` 才不加载。于是 L11 的隔离被 L12 抵消。
+   同时实测：显式空 → 用户技能/命令消失（182 → 51 条命令）；带 user / 不带参数 → 都在。
+   **技能与用户设置同源，无法用 `--setting-sources` 解耦。**
+2. **用户 settings 里的终端白名单**：`~/.claude/settings.json` 有
+   `availableModels: ["opus","sonnet","fable"]`（orca/magpie 维护，终端别名）。
+   CLI 的模型切换门 `isModelAdmittedByAvailableModels` 用它拒绝一切网关模型
+   （`error_code: restricted_by_org`，探针 1:1 复现）。
+3. **桌面本该覆盖它**：桌面 3P 模式（`managesProviderRouting() === true`）会在
+   managed settings（policy 层，优先级最高）里下发 `availableModels`，
+   但 `ZBt()` 只在**部署配置带 `inferenceModels`** 时才有清单；本机生效配置
+   （"magpie"）没有 `inferenceModels`（走 discovery），于是没下发 → 用户层白名单生效。
+   实测：managed 层 `availableModels` 可以覆盖用户层；`[1m]` 变体由前缀匹配放行。
+
+### 修复（L13）
+
+`ZBt()` 的白名单改为从 `resolvedModels()` 构造 —— 它本身已经实现
+「部署 admin 清单优先、否则用发现的网关模型」，并给条目打 `restricted` /
+`updateRequired` 标记。等长替换（165 → 143 字节 + 22 空格）：
+
+| 目标 | 文件 | offset |
+|---|---|---|
+| managed settings 模型白名单构造 | `.vite/build/index.chunk-Cyt2WTko.js` | 2085214 |
+
+效果：CLI 始终从 policy 层拿到白名单（= 部署配置清单，或发现列表），
+用户层 `availableModels` 不再能限制桌面会话；picker / 技能 / L11 模型切换全部保持。
+
+### 验证
+
+- 真机 CLI 探针（stream-json + `set_model`）：
+  - `--setting-sources=user` / 不带参数 → `restricted_by_org`（复现）
+  - `--setting-sources=` → 放行（但技能消失）
+  - 默认来源 + `--managed-settings {"availableModels":[…]}` → 放行（L13 的效果）
+  - `[1m]` 变体经前缀匹配放行
+- `ZBt` 单元测试（从补丁前后 bundle 提取真函数 + 桩）：
+  原版在 discovery 模式下**不下发白名单**（复现缺陷）；补丁版下发发现列表且
+  排除 restricted/updateRequired；admin 清单路径与非 3P 路径不受影响
+- `node --check`、幂等复检（20 层 ASAR + 7 层 renderer 全 `already_applied`）、
+  `codesign` 通过；已 bundle 级替换装机并启动验证
+
+> **⚠️ 认知更新**：L12 之后，桌面会话**会**读取用户级 settings 文件（技能与设置同源），
+> 所以模型白名单必须靠 L13 在 policy 层覆盖，而不是靠 L11 的 sources 隔离。
+> 未来若再遇「模型被 org 拒绝」，先查 `ZBt()` 与 CLI 的 `availableModels` 解析链。
+
+---
+
 ## 2026-10-13 — 适配 Claude Desktop 2.31226.1 + 正式 App 重装
 
 ### 版本

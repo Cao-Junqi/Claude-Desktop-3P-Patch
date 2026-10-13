@@ -120,3 +120,43 @@ python3 patch_claude_3p_macos_0921.py --app /Applications/Claude.app \
 
 关键提醒：**L2d 的共享门（`wt`→`pr`）是本次最隐蔽的失效点** —— dry-run 表面 applied，
 只有幂等复检才能暴露。后续适配新版必须重跑「已 patch App 的 dry-run」。
+
+---
+
+# 追加：L13 模型切换被 org 设置拒绝（同日修复）
+
+## 症状
+
+装机后选择发现的 3P 模型（`gemini-3.8-flash-high`、`anthropic/magpie-*`）弹出
+「… is restricted by your organization('s settings) …」，会话继续用旧模型。
+
+## 根因链（真机 CLI 探针逐条验证）
+
+用 stream-json 协议直接驱动 CLI（`initialize` + `set_model` 控制请求）：
+
+| 探针条件 | 结果 |
+|---|---|
+| `--setting-sources=user` + 切到 `gemini-3.8-flash-high` | ❌ `restricted_by_org`（用户白名单生效） |
+| **不带 `--setting-sources`**（L12 现状） | ❌ 同样拒绝 —— **CLI 默认加载用户 settings** |
+| `--setting-sources=`（显式空） | ✅ 放行，但用户技能/命令消失（命令数 182 → 51） |
+| 默认来源 + `--managed-settings {"availableModels":[…]}` | ✅ 放行（policy 层覆盖用户层） |
+| managed 白名单含基础 ID，切 `…[1m]` 变体 | ✅ 前缀匹配放行 |
+
+结论：1) 技能与用户设置同源，无法靠 `--setting-sources` 解耦（L12 的副作用无法避免）；
+2) 用户 `~/.claude/settings.json` 的 `availableModels: ["opus","sonnet","fable"]` 成为桌面会话的实际白名单；
+3) 桌面 3P 本应在 managed settings 下发自己的白名单来覆盖，但 `ZBt()` 只在部署配置带
+`inferenceModels` 时才有清单 —— 本机生效配置（"magpie"）没有该字段（走 discovery），于是什么都没下发。
+
+## 修复（L13）与验证
+
+`ZBt()` 的白名单改从 `resolvedModels()` 构造（该方法已内置「admin 清单优先、否则发现列表」，
+并给条目打 `restricted`/`updateRequired` 标记），等长替换 165 → 143 字节：
+
+```
+L13:  offset 2085214   (.vite/build/index.chunk-Cyt2WTko.js)
+```
+
+- **真函数单测**（从补丁前后 bundle 提取 `ZBt` + 桩）：原版在 discovery 模式下不下发白名单（复现缺陷）；
+  补丁版下发发现列表且排除 restricted/updateRequired；admin 清单与非 3P 路径行为不变
+- `node --check` 通过；幂等复检 20 层 ASAR + 7 层 renderer 全 `already_applied`；codesign 通过
+- 已 bundle 级替换装机并启动验证（原版备份 `/Applications/Claude-backup-2.31226.1.app` 保留）

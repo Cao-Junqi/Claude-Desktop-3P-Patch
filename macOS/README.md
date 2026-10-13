@@ -30,6 +30,9 @@ sudo python3 patch_claude_3p_macos_0921.py \
   L12（SDK 参数拼装改用 `Y7()`）更新特征码。
 - **L2d 关键修复**：renderer 共享黑名单门 `wt` 改名 `pr`（黑名单/白名单/列表 `fr`/`ur`/`dr`）。
   首轮 dry-run 因兜底分支命中而「假 applied」，幂等复检才暴露 —— 已补新门特征码。
+- **L13 新增**：修复选 3P 模型时提示「restricted by your organization」——
+  CLI 白名单改由桌面在 managed settings（policy 层）下发（部署清单优先、否则发现列表），
+  用户终端 `availableModels` 不再限制桌面会话。
 - 其余层原样命中 2.2553 特征码；L2b / L5 / L7 在新版原生已处理，无需 patch。
 
 ### 2. patch_claude_zhcn_macos_0921.py ⭐️ 最新

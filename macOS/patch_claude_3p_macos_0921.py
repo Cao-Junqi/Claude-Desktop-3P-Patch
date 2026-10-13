@@ -23,6 +23,10 @@ Patch layers (see build_index_patch_specs / build_renderer_patch_specs):
 - L12              SDK CLI argument builder — omit an empty
                    `--setting-sources=` so Desktop still loads user skills
                    and slash commands
+- L13              managed-settings builder — always hand the CLI a 3P model
+                   allowlist (deployment list, else discovered gateway
+                   models) so the user tier's terminal `availableModels`
+                   cannot deny desktop model switches
 - L2d/L9/L10       renderer bundle (ion-dist/, OUTSIDE app.asar) — model
                    validators, the selectable-language list and the model
                    picker's availableModels allowlist gate. Missing these
@@ -49,6 +53,9 @@ Changes from 0903:
 Changes from 2.2553:
 - L1/L10/L12 updated for 2.31226 (helper validators renamed rUt/dUt, picker
   gate renamed s/o/D, SDK arg builder wraps flag+value in Y7())
+- L13 added: without it, L12's omitted --setting-sources makes the CLI load
+  ~/.claude/settings.json, whose terminal `availableModels` aliases deny
+  every discovered gateway model ("restricted by your organization")
 - Everything else matched 2.2553 signatures unchanged (L2/L2c/L4/L6/L11,
   L2d/L9, L3b)
 """
@@ -646,6 +653,36 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 (
                     b'ee!==void 0&&w.push(Y7("--setting-sources",ee.join(",")))',
                     b'ee?.length &&w.push(Y7("--setting-sources",ee.join(",")))',
+                    False,
+                ),
+            ],
+        ),
+        (
+            "L13 3P CLI model allowlist (override user-tier availableModels)",
+            [
+                # 2.31226: with L12 the SDK omits an empty --setting-sources,
+                # so the CLI falls back to ITS default, which DOES load
+                # ~/.claude/settings.json (user tier) — that is how the user's
+                # terminal `availableModels: ["opus","sonnet","fable"]` leaked
+                # back into desktop sessions and every gateway model switch was
+                # denied with "restricted by your organization's settings".
+                # The desktop's managed-settings builder only emitted
+                # `availableModels` when the deployment config carried an
+                # explicit model list (inferenceModels); in discovery mode it
+                # emitted none, leaving the user tier in charge.
+                #
+                # Build the allowlist from resolvedModels() instead: that
+                # already prefers the deployment's admin list and otherwise
+                # falls back to the discovered gateway models, and it flags
+                # restricted / update-required entries, so filtering on those
+                # flags keeps the previous exclusions.
+                # Equal length (165 -> 143 bytes + 22 pad).
+                (
+                    b'let{isRestrictedModel:n}=t,r=t.modelNamesNeedingUpdate?.(e.models?.list),i=e.models?.list?.filter((e=>!n(e.name)&&!r?.has(e.name))).map((e=>e.name)),a=XBt($je(e),n);',
+                    pad_bytes(
+                        b'let{isRestrictedModel:n}=t,i=W().resolvedModels(W().discoveredModels).filter(e=>!e.restricted&&!e.updateRequired).map(e=>e.id),a=XBt($je(e),n);',
+                        len(b'let{isRestrictedModel:n}=t,r=t.modelNamesNeedingUpdate?.(e.models?.list),i=e.models?.list?.filter((e=>!n(e.name)&&!r?.has(e.name))).map((e=>e.name)),a=XBt($je(e),n);'),
+                    ),
                     False,
                 ),
             ],
