@@ -208,3 +208,12 @@ SkillHub 是一次失败的注入实验（面板有全局显示 bug，且依赖�
 11. **ASAR 内文件手工提取要对齐偏移**：file data 起点是 `8 + header pickle size`（即 `8 + data[4:8]`），
     不是 `16 + data[12:16]`（那会错 1 字节的 pickle padding，JS 文件会以垃圾字节开头、`node --check` 假报错）。
     脚本内部 `patch_asar()` 用的是正确偏移。
+12. **模型切换失败先分清是哪一类**（2026-10-13 补）：
+    - `… is restricted by your organization('s settings) …` → 本地白名单门，属 L11/L12/L13 域，可补丁解决；
+    - `The API returned an error ({code}) when Claude Code checked the model` → **用户网关/上游拒绝，补丁无关**
+      （出现它说明白名单门已放行、切换已走到真实 API 校验请求）。
+      查 `~/.config/magpie/routing/<date>.jsonl`（magpie 网关的路由日志，含每次尝试的账号、状态码、上游原文）。
+      本次实例：Antigravity 路由对 **Claude Code / Agent SDK 系统提示词的请求**固定回 429
+      `Resource has been exhausted`（与剩余配额无关，等待无效），且一个账号还要先做 Google 账号验证（403）；
+      用不带 Claude Code 系统提示词的最小请求直连同模型可 200 成功 → 模型本身可用。
+      处理：换其他 provider / 在路由组里加 fallback；换 `owned_by` 不同的模型可快速自检。

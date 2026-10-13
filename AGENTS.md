@@ -385,6 +385,41 @@ CLI 把空来源列表当作权威配置，不再回退加载用户技能和 leg
 验证：探针复现/放行矩阵 + 补丁前后真函数单测 + `node --check` + 幂等 + 装机启动。
 详见 CHANGELOG.md「2026-10-13 L13」。
 
+### 10. 模型切换提示「API returned an error … when Claude Code checked the model」（上游拒绝，2026-10-13）
+
+症状：切换发现模型时提示
+`Couldn't switch to {model}. The API returned an error ({code}) when Claude Code checked the model. Still using {current}.`，
+例如 `HTTP 400: Antigravity: Resource has been exhausted (e.g. check quota)`。
+
+**这是上游/网关问题，不是补丁能修的东西** —— 出现它反而说明 L13 生效了：
+白名单门已放行，模型切换走到了 Claude Code 的**真实 API 校验请求**（i18n `vHi7djeZSl`，把上游报错原文填进 `{code}`），
+上游拒绝 → CLI 不切换 → 会话留在旧模型。
+
+**两类报错的区分（排查入口）**：
+
+| 报错文案 | 归属 | 处理 |
+|---|---|---|
+| `… is restricted by your organization('s settings) …` | 本地白名单门（L11/L12/L13 域） | 看 L13 / `ZBt()` / `availableModels` 解析链 |
+| `The API returned an error ({code}) when Claude Code checked the model` | 用户网关/上游 | 查网关路由日志，换上游；补丁无关 |
+
+**本次实例（magpie 网关 + Antigravity 路由）的证据链**：
+
+- magpie 路由日志（`~/.config/magpie/routing/<date>.jsonl`）记录了完整尝试过程，`agent: claude-desktop`：
+  - 账号 `cj.q@outlook.com` → **403** `Verify your account to continue`（Google 账号需验证）
+  - 账号 `Junqi.c@outlook.com` → **429** `Resource has been exhausted (e.g. check quota)`，并附 magpie 自己的注释：
+    > Antigravity answers this 429 to **the system prompt of Claude Code and the Claude Agent SDK (Claude Desktop's chats)**
+    > whatever quota is left, so it is **not a quota and waiting won't help**；建议换 provider 或在路由组里把别的 provider 串在它后面
+  - 两个账号都失败后 magpie 向客户端汇总 400 → 桌面原样展示
+- 对照实验：用**不带 Claude Code 系统提示词**的最小请求（普通 `hi`）直连同一网关的同一模型 → **HTTP 200**。
+  即模型本身可用，被拒的是「Claude Code / Agent SDK 形状的请求」。
+- 旁证：同日 `SOCODE: All available accounts exhausted` 出现 161 次 —— 网关多个上游池都会打满。
+
+**处理建议**：给该模型换 provider（或在路由组里加 fallback 串联）；想继续用 Antigravity 需先验证对应
+Google 账号（403 那条），但「它拒绝 Claude 类流量」这一条本地无法绕过。**等待配额复位无效。**
+
+**快速自检**（不改任何东西）：换一个**其他路由**的模型试试（如 `mythos-magpie-1320615525` = Grok 4.7，
+`owned_by: grok-shep`）——能用就说明是单一路由/上游的问题，而不是 Claude 侧。
+
 ---
 
 ## 0811 适配记录（2026-08-11）
