@@ -2,13 +2,21 @@
 
 Claude Desktop 第三方模型解锁 + 中文汉化工具
 
-**当前适配版本**: Claude Desktop `2.31226.1`（同时支持 `2.2553.1` / `1.44121.4`）
+**当前适配版本**: Claude Desktop `4.23118.0`（同时支持 `2.31226.1` / `2.2553.1` / `1.44121.4`）
 **汉化翻译**: 自研，24000+ 条专业翻译
-**最后更新**: 2026-10-13
+**最后更新**: 2026-11-07
 
 ---
 
 ## 📋 更新日志
+
+### 2026-11-07 - 适配 4.23118.0（ion-dist.asar 结构变化 + Framework digest 双层校验）
+- ✅ **9 层失效全部补齐**：L1（`gsn/wsn`）、L2（`D901lorx.js`）、L4（`q()` ×5）、L6（`P.warn`）、L12（`Z/j`）、L13（`Ann()` 重构 + store getter `K()`）、L2d（门 `Vr` + `Wr/Gr/Kr` + Bedrock 新串）、L9（shared-99 与 shared-67 两个文件）、L10（matcher `I`）
+- ✅ **结构变化**：renderer 从松散目录迁入 `ion-dist.asar`（packaged App 只读 asar）—— 脚本新增「解包 → patch → 重打包」流程，汉化 helper 零改动继续工作
+- ✅ **启动崩溃修复**：Electron 44.9.3 新增 `integrity_digest.mm` 双层校验（Framework 二进制内嵌 plist integrity 条目的 SHA-256 digest，44.4.3 无此机制）—— 新增 `update_electron_asar_digest()` 在重签前重算并写回全部槽位
+- ✅ 4.x 新增的 3P host CLI 探针硬编码 `--setting-sources=`，判定为模型校验路径，不 patch（隔离用户设置反而正确）
+- ✅ 验证：dry-run 全 applied、幂等 36 条全 `already_applied`、`node --check` 全 PASS、codesign OK、启动稳定、汉化 0 warnings
+- ✅ 已装机：`/Applications/Claude.app`（直接替换，旧版随 /tmp 清理）
 
 ### 2026-10-13 - L13：修复「模型被 org 设置拒绝」（restricted by your organization）
 - ✅ 新增 **L13**：CLI 模型白名单改由桌面在 managed settings（policy 层）下发（部署清单优先、否则发现列表）—— 用户终端 `availableModels` 不再限制桌面会话
@@ -80,8 +88,8 @@ Claude Desktop 第三方模型解锁 + 中文汉化工具
 Claude-Desktop-3P-Patch/
 │
 ├── macOS/                                    🍎 macOS 平台
-│   ├── patch_claude_3p_macos_0921.py       第三方模型 patch (2.31226.1 最新)
-│   ├── patch_claude_zhcn_macos_0921.py     中文汉化脚本 (2.31226.1 最新)
+│   ├── patch_claude_3p_macos_0921.py       第三方模型 patch (4.23118.0 最新)
+│   ├── patch_claude_zhcn_macos_0921.py     中文汉化脚本 (4.23118.0 最新)
 │   ├── patch_claude_3p_macos_0811.py       第三方模型 patch (0811 旧版)
 │   ├── patch_claude_zhcn_macos.py          中文汉化脚本 (0811 旧版)
 │   ├── resources/                           汉化资源文件
@@ -165,7 +173,7 @@ python patch_claude_3p_windows_0811.py
 
 | 平台 | 脚本版本 | 适配 Claude 版本 | 状态 | 更新位置 |
 |------|---------|-----------------|------|---------|
-| macOS | 0921 | 2.31226.1 / 2.2553.1 / 1.44121.4 | ✅ 完成（已装机） | 本机 Mac |
+| macOS | 0921 | 4.23118.0 / 2.31226.1 / 2.2553.1 / 1.44121.4 | ✅ 完成（已装机） | 本机 Mac |
 | Windows | 0811 | Windows 版 | ⚠️ 待跟进（未适配 2.x） | Windows 机器 |
 
 ---
@@ -188,7 +196,9 @@ python patch_claude_3p_windows_0811.py
 
 ### macOS 版本更新
 1. 按 [SOP.md](SOP.md)「流程 2：脚本更新流程」执行（dry-run → 提取 bundle → 定位新特征码 → 更新 `build_index_patch_specs()` → 验证）
-2. ⚠️ 记得同时检查 **`ion-dist`（ASAR 外）** 的 L2d / L9 / L10 三层是否命中
+2. ⚠️ 4.23118 起注意两处新机制：
+   - **renderer 已迁入 `ion-dist.asar`**——脚本自动解包/重打包，重打包后自动刷新 Info.plist 的 ion-dist.asar hash
+   - **Electron 44.5+ 内嵌 integrity digest**（`integrity_digest.mm`）——改 asar 后必须重算 Framework 内嵌 digest（脚本 `update_electron_asar_digest()` 已自动化），否则启动即崩
 3. 更新 `macOS/resources/` 汉化资源（如需要）
 4. 测试后提交
 
@@ -200,6 +210,6 @@ python patch_claude_3p_windows_0811.py
 
 ---
 
-**最后更新**: 2026-10-13
+**最后更新**: 2026-11-07
 **维护者**: 项目团队
 **许可**: 内部使用

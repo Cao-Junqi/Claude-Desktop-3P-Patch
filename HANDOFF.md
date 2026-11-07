@@ -4,7 +4,7 @@
 > 技术细节（patch 层、常量、函数）看 [AGENTS.md](AGENTS.md)；操作流程看 [SOP.md](SOP.md)；变更历史看 [CHANGELOG.md](CHANGELOG.md)。
 > 本文件回答"这个项目做过什么、记录在哪、下一步该干嘛"。
 >
-> 最后更新：2026-10-13（2.31226.1 适配 + 正式 App 重装完成）
+> 最后更新：2026-11-07（4.23118.0 适配 + digest 崩溃修复 + 已装机 + 已推送）
 
 ---
 
@@ -111,7 +111,52 @@ SkillHub 是一次失败的注入实验（面板有全局显示 bug，且依赖�
 
 ---
 
-## 4. 当前状态与待办（截至 2026-10-13）
+## 4. 当前状态与待办（截至 2026-11-07）
+
+### 4.23118.0 适配（✅ 已闭环：适配 + 崩溃修复 + 已装机 + 已推送）
+
+- **版本**：`4.23118.0`（`/Users/junqi/Downloads/Claude.dmg`，2026-11-07 下载，Electron 44.9.3）。
+- **状态**：人工验证通过；已装机 `/Applications/Claude.app`（bundle 级直接替换，用户明确不留备份，
+  旧版在 `/tmp/Claude-replaced-2.31226.app` 随系统重启清理）；装机版幂等 dry-run 全 `already_applied`。
+  文档（README/CHANGELOG/AGENTS/SOP/PROCESS-LOG/TODO）已同步更新，git 已推送。
+- **遗留待办**：Windows 版适配 4.x/2.x（长期项，见 TODO.md T1）。详细技术记录见
+  CHANGELOG 2026-11-07 条目与 AGENTS.md「近期重要修复 11」。
+- **结构变化（重大）**：renderer 从松散目录 `ion-dist/assets/v1/` 迁入 **`ion-dist.asar`**
+  （packaged App 强制读 asar，`sci()` = `isPackaged ? "ion-dist.asar" : "ion-dist"`）。
+  脚本新增 **解包→patch→重打包** 流程：`extract_ion_dist_asar()` / `repack_ion_dist_asar()`，
+  汉化 helper 和 feature-UI 注入零改动继续工作；重打包后刷新 Info.plist
+  `ElectronAsarIntegrity` 的 `Resources/ion-dist.asar` 条目。
+- **失效层 9 层，全部补齐**：L1（`rUt/dUt`→`gsn/wsn`）、L2（行名 `e`→`t`，`D901lorx.js`）、
+  L4（`K()`→`q()`，4 块 +1 return）、L6（`N.warn`→`P.warn`，`BBUaTQ8d.js`）、
+  L12（`Y7/w`→`Z/j`，`CqnLpjST.js`）、L13（`ZBt()`→`Ann()` 重构：i=对象列表、
+  a/o/s 分离，store getter `W()`→`K()`）、L2d（门 `pr`→`Vr`，`Br/Lr/zr`；providers
+  `Dt/Ot/kt`→`Wr/Gr/Kr`；Bedrock 串重写）、L9（数组在 shared-99 与 shared-67 **两个文件**）、
+  L10（matcher `D`→`I`，`c9543da06-*.js`）。
+- **4.x 新增的 3P host CLI 探针**（`dpljRHC9.js`）硬编码 `--setting-sources=`（隔离用户设置），
+  经比对 2.31226 无此结构；判定为模型校验探针路径，**不 patch**（隔离反而正确）。
+- **装机首验崩溃 → 根因 + 修复（本次核心）**：
+  - **症状**：启动 `FATAL archive.cc:256 Failed to get integrity for validatable asar archive: Resources/app.asar`。
+  - **二分定位**（8 个对照副本）：仅重签 ✓ / 仅 plist 重写 ✓ / 仅 app.asar patch ✗ / 仅 ion-dist 重打包 ✗
+    / 单层 patch ✗ / 删 plist integrity 条目 ✗ / 翻 fuse（integrity、onlyLoadAppFromAsar）✗。
+  - **根因**：Electron 44.9.3 新增 `integrity_digest.mm`（44.4.3 无此文件）——Framework 二进制
+    `__DATA_CONST,__asar_integrity` 段内嵌 plist `ElectronAsarIntegrity` 条目的 SHA-256 digest
+    （sentinel `AGbevlPCksUGKNL8TSn7wGmJEuJsXb2A` + used + version + 32 字节，**4.x 有两处槽位**）。
+    公式：按键名字面排序，逐条 `Update(key + algorithm + hash)`。plist hash 更新后 digest 不匹配 →
+    `IsIntegrityDictionaryValid` 返回 false → 启动 FATAL。2.31226 的槽位 used=0（未打包）→ fail-open →
+    这就是旧版同流程能跑的原因。
+  - **修复**：新增 `update_electron_asar_digest()` —— 从当前 Info.plist 重算 digest，
+    **等长写回 Framework 全部 active 槽位**（在 resign 之前调用）。
+- **AI 验证（修复后全过）**：dry-run 全 applied（L2b/L7 预期 missing）、patch 全流程 OK
+  （extract 5039 → repack 5041，digest 2 槽位全部 patched）、幂等 36 条全 `already_applied`、
+  `node --check` ASAR 7 + renderer 4 全 PASS、L9 数组 14 语言无重复、codesign verify OK、
+  **启动存活（15s+）**、汉化 0 warnings。
+- **临时 App**：`/tmp/claude-fix2-test/Claude.app`（已 patch 已重签已修 digest）。
+- **⚠️ 教训（影响 SOP）**：
+  1. SOP 步骤 3 的提取片段 `base = 16 + hsize` 是错的（hsize 读的是 header string 长度），
+     正确 base = `8 + header_size`（用 `read_asar_header()`），否则 `node --check` 误报、offset 全偏。
+  2. 44.5+ 的 Electron 改 asar 后必须同步重算 Framework 内嵌 digest（本脚本已自动化）；
+     以后升级 Electron 大版本需留意 `integrity_digest.mm` 的公式变化。
+- **下一步**：~~人工验证 → 文档 → 推送 → 装机~~（已全部完成，2026-11-07）。
 
 ### L13 模型白名单修复（已装机）
 

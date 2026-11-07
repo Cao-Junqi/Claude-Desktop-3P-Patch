@@ -34,7 +34,9 @@ patch_claude_3p_v2.py
 - 合并中文汉化能力，并让 App 内语言选择器显示"简体中文"；
 - 默认采用 DMG → 临时 App → patch → 验证 的安全流程，只有显式 `--install` 才替换 `/Applications/Claude.app`。
 
-**当前状态**：脚本已适配 2.31226.1（1013）、2.2553.1（0921）与 1.44121.4（0903），功能为纯 3P patch + 本地恢复 + 中文汉化（汉化已扩到 11664 条补全）+ L10 模型选择器门控绕过 + L12 用户技能/斜杠命令恢复，无额外注入。
+**当前状态**：脚本已适配 4.23118.0（1107，已装机）、2.31226.1（1013）、2.2553.1（0921）与 1.44121.4（0903），功能为纯 3P patch + 本地恢复 + 中文汉化（汉化已扩到 11664 条补全）+ L10 模型选择器门控绕过 + L12 用户技能/斜杠命令恢复，无额外注入。
+
+> **4.23118 两个关键机制**（详见 CHANGELOG 2026-11-07）：① renderer 迁入 `ion-dist.asar`，脚本自动解包/重打包并刷新 Info.plist hash；② Electron 44.5+ 的 Framework 二进制内嵌 `ElectronAsarIntegrity` digest（`integrity_digest.mm`），改 asar 后必须用 `update_electron_asar_digest()` 重算写回，否则启动即崩（2.31226 的 44.4.3 无此机制所以旧流程没事）。
 
 ---
 
@@ -43,30 +45,36 @@ patch_claude_3p_v2.py
 | 项 | 值 |
 |---|---|
 | 系统 | macOS |
-| 已验证 Claude Desktop 版本 | `2.31226.1`（1013，已装机） |
-| 上一版本 | `2.2553.1`（构建日 0918） |
+| 已验证 Claude Desktop 版本 | `4.23118.0`（1107，已装机，Electron 44.9.3） |
+| 上一版本 | `2.31226.1`（1013，Electron 44.4.3） |
 | Bundle ID | `com.anthropic.claudefordesktop` |
 | 3P 主脚本 | `macOS/patch_claude_3p_macos_0921.py` |
 | 汉化脚本 | `macOS/patch_claude_zhcn_macos_0921.py` |
 | 中文资源目录 | `macOS/resources/` |
 | 旧版本脚本 | `macOS/patch_claude_3p_macos_0811.py`、`macOS/patch_claude_zhcn_macos.py` |
 
-> 脚本文件名保留 `0903`（首版适配时的命名），实际同时支持 `1.44121.4`、`2.2553.1` 与 `2.31226.1`：每个 patch 层都保留多版本特征码，逐条尝试。
+> 脚本文件名保留 `0903`（首版适配时的命名），实际同时支持 `1.44121.4`、`2.2553.1`、`2.31226.1` 与 `4.23118.0`：每个 patch 层都保留多版本特征码，逐条尝试。
 >
 > ⚠️ **安装注意（2.31226 起）**：macOS App Management（TCC）会拒绝非授权进程**在 app bundle 内部写文件**
 > （`PermissionError: Operation not permitted`，即便属主是当前用户、`/Applications` 目录可写）。
-> 装机改为 **bundle 级替换**：`/tmp` 内打补丁 + 重签 → `mv` 原版到备份 → `cp -R` 替换 → `xattr -cr`。
+> 装机改为 **bundle 级替换**：`/tmp` 内打补丁 + 重签 → `mv` 原版出 bundle → `cp -R` 替换 → `xattr -cr`。
 
 ---
 
-## ⚠️ 关键结构：renderer 在 app.asar 之外
+## ⚠️ 关键结构：renderer 在 app.asar 之外（4.23118 起在 ion-dist.asar 内）
 
-`Contents/Resources/ion-dist/` **不在 `app.asar` 内**，是独立目录。这导致过两类真实故障：
+- **2.31226 及以前**：renderer 在松散目录 `Contents/Resources/ion-dist/assets/v1/`，不在 `app.asar` 内。
+- **4.23118 起**：renderer 资产整体迁入 **`Contents/Resources/ion-dist.asar`**（独立 asar，
+  目录里只剩 index.html；packaged App 只读 asar，缺它时走「no page is served」分支）。
+  脚本用 `extract_ion_dist_asar()` / `repack_ion_dist_asar()` 自动「解包 → patch → 重打包」，
+  重打包后刷新 Info.plist `ElectronAsarIntegrity` 的 ion-dist.asar 条目。
+
+历史上的两类真实故障（ motivating L2d / L9 两层）：
 
 1. **渲染进程有自己的模型校验器副本**。主进程的 `Yo()` 与渲染进程的 `At()` 是两套独立代码，只补前者时 Settings 仍会拒绝 3P 模型名，报 `Doesn't look like an Anthropic model: 需要一个引用 Anthropic 模型的网关模型路由…`。
 2. **语言选择器的可选语言是硬编码数组**（`Am`，导出为 `vm`，被 `shared-21` 当作 `offeredLocales`）。`zh-CN.json` 存在但不在数组里就不会出现在下拉框。
 
-对应新增的两个 patch 层（见下表 L2d / L9）。文件名带内容哈希（如 `ce459c687-B4NlOXPM.js`），必须**按内容定位**，不能按文件名。
+文件名带内容哈希（如 `c6f6cf4c2-mK6FedDX.js`），必须**按内容定位**，不能按文件名。
 
 ---
 
@@ -79,7 +87,9 @@ APP_DEFAULT = Path("/Applications/Claude.app")
 APP_ASAR_REL = Path("Contents/Resources/app.asar")
 ASAR_INDEX_PREFIX = ".vite/build/index"          # 0811+ 代码分割，多文件扫描
 ASAR_SWIFT = "node_modules/@ant/claude-swift/js/index.js"
-FRONTEND_ASSETS_REL = Path("Contents/Resources/ion-dist/assets/v1")   # renderer（ASAR 外）
+FRONTEND_ASSETS_REL = Path("Contents/Resources/ion-dist/assets/v1")   # renderer（4.23118 起在 ion-dist.asar 内，脚本自动解包）
+ION_DIST_ASAR_REL = Path("Contents/Resources/ion-dist.asar")          # 4.23118+
+ASAR_DIGEST_SENTINEL = b"AGbevlPCksUGKNL8TSn7wGmJEuJsXb2A"            # 44.5+ Framework 内嵌 digest 槽
 POLICY_DOMAIN = "com.anthropic.claudefordesktop"
 LANG_CHOICES = ["zh-CN", "zh-TW", "zh-HK"]
 ```
@@ -171,6 +181,10 @@ LOCAL_FEATURE_BOOL_KEYS = [
 
 > L2d / L9 是 2026-09-21 新增，L10 是 2026-09-30 新增，L11 是 2026-10-01 新增，L12 是 2026-10-05 新增；L11 / L12 针对 ASAR 内主进程。**排查「模型被拦」「语言列表没有中文」「发现的模型在 picker 里灰化」「选中模型提示 restricted by your organization」「用户斜杠命令不出现」时优先看这五层**，见上文「关键结构」。
 >
+> ⚠️ **4.23118 起 renderer 在 `ion-dist.asar` 内**（不再是对目录里文件 grep），L2d / L9 / L10 的
+> 目标文件由脚本自动「解包→patch→重打包」处理；手工排查时先用 `read_asar_header()` 提取
+> `ion-dist.asar` 的 `assets/v1/*.js`（**base = 8 + header_size**，不是 16 + hsize，见 SOP 教训）。
+>
 > L2b / L5 / L7 属于「新版原生已处理」，脚本里保留注释说明而非留空。
 >
 > ⚠️ 2026-10-13 适配 2.31226 时发现 **L2d 会「假 applied」**：dry-run 报 applied 的只是兜底分支
@@ -182,6 +196,28 @@ LOCAL_FEATURE_BOOL_KEYS = [
 > 而用户技能/命令与用户设置**同源**（显式空 → 技能消失），无法用 sources 解耦。
 > 因此 L12（恢复技能）会顺带恢复用户层 `availableModels` 的模型限制，
 > 由 **L13** 在 managed settings（policy 层）下发白名单来覆盖。**排查「模型被 org 拒绝」先看 L13。**
+>
+> ⚠️ **Electron 44.5+ 内嵌 integrity digest（4.23118 起生效）**：改任何 asar（app.asar 或
+> ion-dist.asar）都会使 plist 的 `ElectronAsarIntegrity` hash 变化，而 Framework 二进制
+> `__asar_integrity` 段内嵌的 digest（44.4.3 未打包所以 2.31226 不受影响）会在启动时校验
+> plist 条目，不匹配即 `FATAL: archive.cc:256 Failed to get integrity…`。
+> 脚本 `update_electron_asar_digest()` 已自动化（重签前重算写回全部槽位，4.x Framework 有两处）。
+
+4.23118 实测要点（仅用于排查，不作为 patch 定位依据）：
+
+```text
+L1:   gsn/wsn helper             (index.chunk-BBUaTQ8d.js)
+L2:   行 id e→t                  (index.chunk-D901lorx.js)
+L4:   q() ×4 块 + 1 return       (index.chunk-BBUaTQ8d.js)
+L6:   P.warn string + {title:""} (index.chunk-BBUaTQ8d.js)
+L12:  Z / j（Y7→Z, w→j）         (index.chunk-CqnLpjST.js)
+L13:  Ann()，getter K()          (index.chunk-BBUaTQ8d.js)
+L2d:  Vr 门 + Wr/Gr/Kr + Bedrock 新串   (ion-dist.asar: assets/v1/c6f6cf4c2-mK6FedDX.js)
+L9:   shared-99-Do2dhk0C.js + shared-67-CqVL4EFG.js（两处都要）
+L10:  matcher I                  (ion-dist.asar: assets/v1/c9543da06-Cr1RzXVI.js)
+L3b:  (claude-swift)
+digest: Framework __asar_integrity 槽 ×2（sentinel AGbevlPC…，公式 key+algorithm+hash 按键名排序）
+```
 
 2.31226 实测 offsets（仅用于排查，不作为 patch 定位依据）：
 
@@ -419,6 +455,29 @@ Google 账号（403 那条），但「它拒绝 Claude 类流量」这一条本�
 
 **快速自检**（不改任何东西）：换一个**其他路由**的模型试试（如 `mythos-magpie-1320615525` = Grok 4.7，
 `owned_by: grok-shep`）——能用就说明是单一路由/上游的问题，而不是 Claude 侧。
+
+### 11. 适配 4.23118.0：ion-dist.asar 迁移 + 启动崩溃（Framework 内嵌 digest，2026-11-07）
+
+**适配层**：9 层失效全部补齐（L1/L2/L4/L6/L12/L13 + L2d/L9/L10，见 CHANGELOG 2026-11-07 表）。
+结构性变化：renderer 迁入 `ion-dist.asar`，脚本新增解包/重打包流程。
+
+**装机首验崩溃**：`FATAL: archive.cc:256 Failed to get integrity for validatable asar archive: Resources/app.asar`。
+二分定位（8 个对照副本）排除签名/融合/plist 格式后，读 Electron 44.9.3 源码确认根因：
+
+1. `archive_mac.mm` 的 `HeaderIntegrity()` 从磁盘 plist 读 `ElectronAsarIntegrity`，先过
+   `IsIntegrityDictionaryValid()`（`integrity_digest.mm`，**44.5+ 新增，2.31226 的 44.4.3 没有**）。
+2. 该函数把 Framework 二进制 `__DATA_CONST,__asar_integrity` 段内嵌的 digest 槽
+   （sentinel `AGbevlPCksUGKNL8TSn7wGmJEuJsXb2A` 32B + used + version + 32B digest；
+   **4.x Framework 有两处槽位**）与「plist 条目按键名字面排序、逐条 `key+algorithm+hash`
+   串联的 SHA-256」比对，不匹配 fail-closed → 启动 FATAL。
+3. 2.31226 的槽位 `used=0`（未打包）→ fail-open → 旧版同流程能跑的原因。
+
+**修复**：`update_electron_asar_digest()` —— patch 完 plist 后按同公式重算 digest、
+等长写回全部 active 槽位（`main()` 中 resign 之前调用）。翻 fuse 无效（校验路径仍走）。
+
+**教训**：适配新版先看 Electron 版本号（两版差 0.5 个 minor 就引入了新校验层）；
+dry-run 全 applied + 幂等全过 + codesign OK 都拦不住这类「二进制内嵌校验数据」问题，
+**装机前必须真实启动一次临时 App**。
 
 ---
 

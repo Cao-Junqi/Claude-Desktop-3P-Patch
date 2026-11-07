@@ -4,6 +4,92 @@
 
 ---
 
+## 2026-11-07 — 适配 4.23118.0：ion-dist.asar 结构迁移 + Framework 内嵌 digest 双层校验（装机）
+
+### 版本与 dry-run
+
+- 新版 `4.23118.0`（DMG，2026-11-07 下载）。dry-run 失效 **9 层**：
+  L1 / L2 / L4 / L6 / L12 / L13（主进程）+ L2d / L9 / L10（renderer）；
+  L2c / L11 / L3b 原样命中；L2b / L7 仍为「新版原生已处理」。
+
+### 结构变化（重大）：renderer 迁入 ion-dist.asar
+
+- 4.x 把 renderer 资产从松散目录 `Contents/Resources/ion-dist/assets/v1/` 迁入
+  **`Contents/Resources/ion-dist.asar`**（目录里只剩 index.html）。主进程
+  `sci()` 解析为 `isPackaged ? "ion-dist.asar" : "ion-dist"`，packaged App 强制读 asar，
+  松散目录无效；缺 asar 时走「no page is served」错误分支。
+- 脚本新增 **解包 → patch → 重打包** 流程：`extract_ion_dist_asar()`（asar → 松散目录，
+  让 L2d/L9/L10、feature-UI 注入、汉化 helper 的全部既有松散文件逻辑零改动继续工作）+
+  `repack_ion_dist_asar()`（重算全部文件 offset 与 per-file integrity、重建 header、
+  刷新 Info.plist `ElectronAsarIntegrity` 的 `Resources/ion-dist.asar` 条目、删除松散目录）。
+  dry-run 时解包用于报告、结束后清理，不动 asar。
+- Info.plist 里 `Resources/ion-dist.asar` 有独立 hash 条目，新增
+  `update_electron_asar_integrity_entry()` 负责更新。
+
+### 各层新特征码（4.23118，均在保留旧版 fallback 的前提下追加）
+
+| 层 | 变化 | 新特征码要点 |
+|---|---|---|
+| L1 | helper 校验器改名 | `rUt/dUt` → `gsn/wsn`（`index.chunk-BBUaTQ8d.js`） |
+| L2 | 行 id 改名 | `e`→`t`（`index.chunk-D901lorx.js`） |
+| L4 | 策略接收器改名 | `K()`→`q()`，4 处块 guard（allow_multi）+ 1 处 early-return |
+| L6 | 日志对象改名 | `N.warn`→`P.warn`，string 与 `{title:""}` 两形态（`BBUaTQ8d.js`） |
+| L12 | SDK 拼装改名 | `Y7`→`Z`、`w`→`j`（`index.chunk-CqnLpjST.js`） |
+| L13 | 白名单构造器重构 | `ZBt()`→`Ann()`：过滤结果保持对象（i），下游 a（ids）/o（behavesAs pairs）/s（pricing）分离；`r`（modelNamesNeedingUpdate）仅喂 filter，可安全去掉；store getter `W()`→`K()`；`availableModels` 仍映射 `e.id` |
+| L2d | 共享门与 providers 改名 | 门 `pr`→`Vr`（`Br/Lr/zr`）；providers `Dt/Ot/kt`→`Wr/Gr/Kr`；Bedrock 拒绝串重写为 `"expected an Anthropic model ID on Bedrock (such as …)"` |
+| L9 | 语言数组 | **shared-99 与 shared-67 两个文件**都有（此前每版一个） |
+| L10 | matcher 改名 | `D`→`I`（`c9543da06-Cr1RzXVI.js`） |
+
+- 4.x 新增的 **3P host CLI 探针**（`index.chunk-dpljRHC9.js`）硬编码追加
+  `"--setting-sources="`（2.31226 无此结构，host CLI 路径当时不传该参数）。
+  唯一调用方是 `-p .` 无头模型校验探针（`--tools ""`），隔离用户设置反而正确，**不 patch**。
+  另有 sandbox 状态探针（`BBvq7wsF.js`）硬编码 `["--setting-sources","user"]`，同判不 patch。
+
+### 装机首验崩溃 → 根因：Framework 内嵌 integrity digest（双层校验）
+
+- **症状**：启动 3.8s 即
+  `FATAL:archive.cc:256 Failed to get integrity for validatable asar archive: Resources/app.asar`。
+- **二分定位**（8 个对照副本）：仅重签 ✓ 存活 / 仅 plist 重写 ✓ / 仅 app.asar patch ✗ /
+  仅 ion-dist 重打包 ✗（app.asar 原封也崩）/ 单层 patch ✗ / 删 plist integrity 条目 ✗ /
+  翻 fuse（EnableEmbeddedAsarIntegrityValidation、OnlyLoadAppFromAsar）✗ /
+  换普通 ad-hoc 签名 ✗。三方数据（磁盘 plist = 签名内嵌 plist = 实际 header hash）验证一致仍崩。
+- **根因**（读 Electron 44.9.3 源码 `archive.cc` / `archive_mac.mm` / `integrity_digest.mm` 确认）：
+  `HeaderIntegrity()` 从磁盘 plist 读 `ElectronAsarIntegrity` 后，先过
+  `IsIntegrityDictionaryValid()` —— 它把 Framework 二进制
+  `__DATA_CONST,__asar_integrity` 段内嵌的 digest 槽
+  （sentinel `AGbevlPCksUGKNL8TSn7wGmJEuJsXb2A` 32B + used 1B + version 1B + digest 32B）
+  与「按键名字面排序、逐条 `key + algorithm + hash` 串联后的 SHA-256」比对，
+  不匹配即 fail-closed。该机制为 **44.5+ 新增**（`integrity_digest.mm` 2025 新文件）；
+  2.31226 的 44.4.3 槽位 `used=0`（未打包）→ fail-open → 旧版同流程能跑的原因。
+  另注意：4.x 的 Framework 二进制里该 sentinel 出现 **两处**（均为有效槽位，两处都要更新）。
+- **修复**：新增 `update_electron_asar_digest()` —— 从当前 Info.plist 重算 digest，
+  等长写回 Framework **全部** active 槽位；在 `main()` 中于 resign 之前调用。
+
+### 4.23118 实测 offsets（仅排查参考）
+
+```text
+L1:   gsn/wsn     (index.chunk-BBUaTQ8d.js)
+L2:   (index.chunk-D901lorx.js)
+L4:   q() ×5      (index.chunk-BBUaTQ8d.js)
+L6:   P.warn ×2   (index.chunk-BBUaTQ8d.js)
+L12:  Z/j         (index.chunk-CqnLpjST.js)
+L13:  Ann/K()     (index.chunk-BBUaTQ8d.js)
+L2d:  Vr/Wr/Gr/Kr (ion-dist.asar: assets/v1/c6f6cf4c2-mK6FedDX.js)
+L9:   shared-99-Do2dhk0C.js + shared-67-CqVL4EFG.js（两处）
+L10:  c9543da06-Cr1RzXVI.js
+L3b:  (claude-swift)
+```
+
+### 验证与装机
+
+- dry-run 全 applied（L2b/L7 预期 missing）、幂等 36 条全 `already_applied`、
+  `node --check` ASAR 7 + renderer 4 全 PASS、L9 数组 14 语言无重复、汉化 0 warnings、
+  codesign verify OK、修复版启动稳定。
+- 已装机：`/Applications/Claude.app` 直接替换（用户明确不留备份，旧版移至
+  `/tmp/Claude-replaced-2.31226.app` 随系统重启清理）；装机版幂等 dry-run 全 `already_applied`。
+
+---
+
 ## 2026-10-13 — L13：模型切换被「restricted by your organization's settings」拒绝（2.31226 适配补丁）
 
 ### 症状

@@ -91,6 +91,21 @@ ASAR_SWIFT = "node_modules/@ant/claude-swift/js/index.js"
 ASAR_INTEGRITY_BLOCK_SIZE = 4 * 1024 * 1024
 POLICY_DOMAIN = "com.anthropic.claudefordesktop"
 FRONTEND_ASSETS_REL = Path("Contents/Resources/ion-dist/assets/v1")
+# 4.23118: the renderer bundle moved from the loose ion-dist/assets/v1
+# directory into its own archive; the packaged app resolves the renderer root
+# as isPackaged ? "ion-dist.asar" : "ion-dist", so a loose directory alone is
+# not served. The patch flow extracts the archive, patches loose files and
+# repacks (see extract_ion_dist_asar / repack_ion_dist_asar).
+ION_DIST_ASAR_REL = Path("Contents/Resources/ion-dist.asar")
+ION_DIST_LOOSE_REL = Path("Contents/Resources/ion-dist")
+# 4.23118 (Electron 44.5+): the Electron Framework embeds a SHA-256 digest of
+# the Info.plist `ElectronAsarIntegrity` entries in its
+# __DATA_CONST,__asar_integrity section (shell/common/asar/integrity_digest.mm,
+# slot: 32-byte sentinel + used byte + version byte + 32-byte digest). Any
+# plist hash update must be mirrored here, or the app aborts at startup with
+# "Failed to get integrity for validatable asar archive". Electron builds
+# without a packaged digest (used != 1, e.g. 2.31226's 44.4.3) fail open.
+ASAR_DIGEST_SENTINEL = b"AGbevlPCksUGKNL8TSn7wGmJEuJsXb2A"
 
 RESTRICTED_ENTITLEMENTS = {
     "com.apple.application-identifier",
@@ -299,6 +314,25 @@ def update_electron_asar_integrity(app: Path, header_string: str) -> bool:
     return True
 
 
+def update_electron_asar_integrity_entry(app: Path, rel_key: str, header_string: str) -> bool:
+    """Update one ElectronAsarIntegrity hash (e.g. Resources/ion-dist.asar)."""
+    info_plist = app / "Contents/Info.plist"
+    if not info_plist.exists():
+        return False
+    with info_plist.open("rb") as f:
+        info = plistlib.load(f)
+    integrity = info.get("ElectronAsarIntegrity")
+    entry = integrity.get(rel_key) if isinstance(integrity, dict) else None
+    if not isinstance(entry, dict) or entry.get("algorithm") != "SHA256":
+        return False
+    entry["hash"] = hashlib.sha256(header_string.encode("utf-8")).hexdigest()
+    tmp = info_plist.with_suffix(info_plist.suffix + ".tmp")
+    with tmp.open("wb") as f:
+        plistlib.dump(info, f, fmt=plistlib.FMT_XML)
+    os.replace(tmp, info_plist)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Byte patching
 
@@ -413,6 +447,19 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                     pad_bytes(b'let l={data:c,success:1};if(0)throw', len(b'let l=dUt.safeParse(c);if(!l.success)throw')),
                     False,
                 ),
+                # 4.23118: helper schemas renamed once more (rUt→gsn strict
+                # clientSecretHelper, dUt→wsn envHelper record); the
+                # safeParse + throw guard shape is unchanged.
+                (
+                    b'let i=gsn.safeParse(r);if(!i.success)throw',
+                    pad_bytes(b'let i={data:r,success:1};if(0)throw', len(b'let i=gsn.safeParse(r);if(!i.success)throw')),
+                    False,
+                ),
+                (
+                    b'let l=wsn.safeParse(c);if(!l.success)throw',
+                    pad_bytes(b'let l={data:c,success:1};if(0)throw', len(b'let l=wsn.safeParse(c);if(!l.success)throw')),
+                    False,
+                ),
             ],
         ),
         (
@@ -440,6 +487,13 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 (
                     b'if(e.startsWith("claude-"))return!0;if(n.length===0)return!1;',
                     b'if(e.startsWith("claude-"))return!0;if(n.length===0)return!0;',
+                    False,
+                ),
+                # 4.23118: same picker gate in index.chunk-D901lorx.js; the row
+                # id local renamed e→t.
+                (
+                    b'if(t.startsWith("claude-"))return!0;if(n.length===0)return!1;',
+                    b'if(t.startsWith("claude-"))return!0;if(n.length===0)return!0;',
                     False,
                 ),
             ],
@@ -537,6 +591,10 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 # policy through K() (4 guards: 3 block form + 1 early-return form).
                 (b'if(K().autoUpdate.disabled){', pad_bytes(b'if(1||K().autoUpdate.dis){', len(b'if(K().autoUpdate.disabled){')), True),
                 (b'if(K().autoUpdate.disabled)return', pad_bytes(b'if(1||K().autoUpdate.dis)return', len(b'if(K().autoUpdate.disabled)return')), False),
+                # 4.23118: updater entry in index.chunk-BBUaTQ8d.js; the policy
+                # receiver renamed K()→q() (4 block guards + 1 early return).
+                (b'if(q().autoUpdate.disabled){', pad_bytes(b'if(1||q().autoUpdate.dis){', len(b'if(q().autoUpdate.disabled){')), True),
+                (b'if(q().autoUpdate.disabled)return', pad_bytes(b'if(1||q().autoUpdate.dis)return', len(b'if(q().autoUpdate.disabled)return')), False),
             ],
         ),
         # L5 removed in 0903: models validation no longer present or moved
@@ -581,6 +639,19 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                 # ({title:""}) instead of a bare string, so it needs its own variant.
                 (
                     b'.catch((e=>(N.warn("[title-gen] failed",{error:String(e)}),{title:""})))',
+                    pad_bytes(b'.catch(()=>({title:String(t.first_session_message||"").slice(0,46)}))', 72),
+                    True,
+                ),
+                # 4.23118: both route handlers moved to index.chunk-BBUaTQ8d.js
+                # and the logger renamed N→P; string and {title:""} forms
+                # unchanged otherwise.
+                (
+                    b'.catch((e=>(P.warn("[title-gen] failed",{error:String(e)}),"")))',
+                    pad_bytes(b'.catch(()=>String(t.first_session_message||"").slice(0,46))', 64),
+                    True,
+                ),
+                (
+                    b'.catch((e=>(P.warn("[title-gen] failed",{error:String(e)}),{title:""})))',
                     pad_bytes(b'.catch(()=>({title:String(t.first_session_message||"").slice(0,46)}))', 72),
                     True,
                 ),
@@ -655,6 +726,13 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                     b'ee?.length &&w.push(Y7("--setting-sources",ee.join(",")))',
                     False,
                 ),
+                # 4.23118: SDK arg builder in index.chunk-CqnLpjST.js; helper
+                # Y7→Z, push target w→j. Same `!==void 0` gate and fix.
+                (
+                    b'C!==void 0&&j.push(Z("--setting-sources",C.join(",")))',
+                    b'C?.length &&j.push(Z("--setting-sources",C.join(",")))',
+                    False,
+                ),
             ],
         ),
         (
@@ -682,6 +760,24 @@ def build_index_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, bool]]
                     pad_bytes(
                         b'let{isRestrictedModel:n}=t,i=W().resolvedModels(W().discoveredModels).filter(e=>!e.restricted&&!e.updateRequired).map(e=>e.id),a=XBt($je(e),n);',
                         len(b'let{isRestrictedModel:n}=t,r=t.modelNamesNeedingUpdate?.(e.models?.list),i=e.models?.list?.filter((e=>!n(e.name)&&!r?.has(e.name))).map((e=>e.name)),a=XBt($je(e),n);'),
+                    ),
+                    False,
+                ),
+                # 4.23118: builder renamed to Ann() in index.chunk-BBUaTQ8d.js
+                # and restructured: the filtered list stays objects (i), mapped
+                # afterwards to ids (a), behavesAs picker pairs (o) and pricing
+                # (s); r (modelNamesNeedingUpdate) only feeds the filter. Swap
+                # the source of i to resolvedModels() — the store getter is K()
+                # in this build (2.31226: W()) — and keep the downstream
+                # mappings intact. availableModels must stay model IDs, so map
+                # e.id; behavesAs pairs only exist on admin-config entries, so
+                # discovery-only setups simply emit no picker options, as
+                # before. Equal length (388 → 354 bytes + pad).
+                (
+                    b'let{isRestrictedModel:n}=t,r=t.modelNamesNeedingUpdate?.(e.models?.list),i=e.models?.list?.filter((e=>!n(e.name)&&!r?.has(e.name))),a=i?.map((e=>e.name)),o=i?.flatMap((e=>e.behavesAs?[{model:e.name,behavesAs:e.behavesAs}]:[])),s=knn(qIe(e),n);',
+                    pad_bytes(
+                        b'let{isRestrictedModel:n}=t,i=K().resolvedModels(K().discoveredModels).filter(e=>!e.restricted&&!e.updateRequired),a=i?.map((e=>e.id)),o=i?.flatMap((e=>e.behavesAs?[{model:e.name,behavesAs:e.behavesAs}]:[])),s=knn(qIe(e),n);',
+                        len(b'let{isRestrictedModel:n}=t,r=t.modelNamesNeedingUpdate?.(e.models?.list),i=e.models?.list?.filter((e=>!n(e.name)&&!r?.has(e.name))),a=i?.map((e=>e.name)),o=i?.flatMap((e=>e.behavesAs?[{model:e.name,behavesAs:e.behavesAs}]:[])),s=knn(qIe(e),n);'),
                     ),
                     False,
                 ),
@@ -757,6 +853,9 @@ RENDERER_VALIDATOR_NEEDLES = (
     # 2.31226: the shared gate moved to `pr` with renamed regex/list locals.
     b'function pr(e){let t=e.toLowerCase();return fr.test(t)?!1',
     b'function pr(e){let t=`claude`',  # already patched
+    # 4.23118: the shared gate renamed to Vr (regex/list locals Br/Lr/zr).
+    b'function Vr(e){let t=e.toLowerCase();return Br.test(t)?!1',
+    b'function Vr(e){let t=`claude`',  # already patched
 )
 RENDERER_LOCALE_NEEDLES = (
     # Prefix only (no closing bracket): stays matchable after the languages are
@@ -813,6 +912,12 @@ def build_renderer_allowlist_patch_specs() -> list[tuple[str, list[tuple[bytes, 
                     b's=t.state==="zet"&&o.some(e=>D(e,t.value))?t:void 0',
                     False,
                 ),
+                # 4.23118: same gate in c9543da06-*.js; matcher renamed D→I.
+                (
+                    b's=t.state==="set"&&o.some(e=>I(e,t.value))?t:void 0',
+                    b's=t.state==="zet"&&o.some(e=>I(e,t.value))?t:void 0',
+                    False,
+                ),
             ],
         ),
     ]
@@ -843,15 +948,32 @@ def build_renderer_patch_specs() -> list[tuple[str, list[tuple[bytes, bytes, boo
                     b'function pr(e){let t=`claude`,____=e;return fr.test(t)?!1:ur.test(t)||dr.some(e=>t.includes(e))}',
                     False,
                 ),
+                # 4.23118: shared gate renamed to Vr (regex/list locals
+                # Br/Lr/zr); same pin-to-whitelisted-literal trick.
+                (
+                    b'function Vr(e){let t=e.toLowerCase();return Br.test(t)?!1:Lr.test(t)||zr.some(e=>t.includes(e))}',
+                    b'function Vr(e){let t=`claude`,____=e;return Br.test(t)?!1:Lr.test(t)||zr.some(e=>t.includes(e))}',
+                    False,
+                ),
                 # Per-provider validators: Dt=Foundry, Ot=Anthropic, kt=gateway.
                 (b'function Dt(e){return wt(e)?{ok:!0}:{ok:!1,reason:', b'function Dt(e){return wt(e)?{ok:!0}:{ok:!0,reason:', False),
                 (b'function Ot(e){return wt(e)?{ok:!0}:{ok:!1,reason:', b'function Ot(e){return wt(e)?{ok:!0}:{ok:!0,reason:', False),
                 (b'function kt(e){return wt(e)?{ok:!0}:{ok:!1,reason:', b'function kt(e){return wt(e)?{ok:!0}:{ok:!0,reason:', False),
+                # 4.23118: provider validators renamed Wr/Gr/Kr and now call Vr.
+                (b'function Wr(e){return Vr(e)?{ok:!0}:{ok:!1,reason:', b'function Wr(e){return Vr(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function Gr(e){return Vr(e)?{ok:!0}:{ok:!1,reason:', b'function Gr(e){return Vr(e)?{ok:!0}:{ok:!0,reason:', False),
+                (b'function Kr(e){return Vr(e)?{ok:!0}:{ok:!1,reason:', b'function Kr(e){return Vr(e)?{ok:!0}:{ok:!0,reason:', False),
                 # Vertex is inline (no wt call); Bedrock returns a warn on the happy path.
                 (b'e.toLowerCase().startsWith("claude-")?{ok:!0}:{ok:!1,reason:', b'e.toLowerCase().startsWith("claude-")?{ok:!0}:{ok:!0,reason:', False),
                 (
                     b'{ok:!1,reason:\'expected a Bedrock model ID with the "anthropic." vendor prefix',
                     b'{ok:!0,reason:\'expected a Bedrock model ID with the "anthropic." vendor prefix',
+                    False,
+                ),
+                # 4.23118: the Bedrock happy-path rejection reworded; same flip.
+                (
+                    b'{ok:!1,reason:"expected an Anthropic model ID on Bedrock (such as us.anthropic.claude-sonnet-4-5-20250929-v1:0) or an inference-profile ARN"}',
+                    b'{ok:!0,reason:"expected an Anthropic model ID on Bedrock (such as us.anthropic.claude-sonnet-4-5-20250929-v1:0) or an inference-profile ARN"}',
                     False,
                 ),
             ],
@@ -982,6 +1104,169 @@ def patch_renderer(app: Path, *, dry_run: bool = False) -> list[dict[str, Any]]:
             path.write_bytes(content)
 
     return results
+
+
+def update_electron_asar_digest(app: Path) -> dict[str, Any]:
+    """Recompute the Framework-embedded ElectronAsarIntegrity digest.
+
+    Electron 44.5+ (first shipped packaged in Claude Desktop 4.23118) hashes
+    the Info.plist integrity entries — keys in literal-sorted order, each
+    key + algorithm + hash concatenated — into the Framework binary. The
+    plist hash updates performed by patch_asar / repack_ion_dist_asar must
+    be mirrored into that slot before the app is re-signed, or the header
+    integrity lookup fails and the app dies at startup.
+    """
+    info_plist = app / "Contents/Info.plist"
+    frameworks = sorted(
+        (app / "Contents/Frameworks").glob("Electron Framework.framework/Versions/*/Electron Framework")
+    )
+    if not info_plist.exists() or not frameworks:
+        return {"status": "skipped", "reason": "plist_or_framework_missing"}
+    with info_plist.open("rb") as f:
+        info = plistlib.load(f)
+    integrity = info.get("ElectronAsarIntegrity")
+    if not isinstance(integrity, dict) or not integrity:
+        return {"status": "skipped", "reason": "no_integrity_entries"}
+    hasher = hashlib.sha256()
+    for key in sorted(integrity.keys()):
+        entry = integrity[key]
+        hasher.update(key.encode("utf-8"))
+        hasher.update(str(entry.get("algorithm", "")).encode("utf-8"))
+        hasher.update(str(entry.get("hash", "")).encode("utf-8"))
+    digest = hasher.digest()
+    slots: list[dict[str, Any]] = []
+    seen: set[Path] = set()
+    for framework in frameworks:
+        real = framework.resolve()
+        if real in seen:
+            continue
+        seen.add(real)
+        data = bytearray(framework.read_bytes())
+        # The binary can carry more than one digest slot (the 4.23118
+        # Framework embeds two); patch every active one.
+        positions: list[int] = []
+        scan = 0
+        while True:
+            pos = data.find(ASAR_DIGEST_SENTINEL, scan)
+            if pos < 0:
+                break
+            positions.append(pos)
+            scan = pos + 1
+        if not positions:
+            slots.append({"framework": framework.name, "status": "digest_slot_missing"})
+            continue
+        for pos in positions:
+            base = pos + len(ASAR_DIGEST_SENTINEL)
+            used, version = data[base], data[base + 1]
+            if used != 1 or version != 1:
+                slots.append(
+                    {"framework": framework.name, "status": "digest_slot_inactive", "used": used, "version": version}
+                )
+                continue
+            slot = base + 2
+            already = bytes(data[slot : slot + 32]) == digest
+            if not already:
+                data[slot : slot + 32] = digest
+            slots.append(
+                {
+                    "framework": framework.name,
+                    "status": "already_applied" if already else "patched",
+                    "digest": digest.hex(),
+                }
+            )
+        if any(s["status"] == "patched" for s in slots):
+            framework.write_bytes(data)
+    patched = any(s["status"] == "patched" for s in slots)
+    applied = any(s["status"] == "already_applied" for s in slots)
+    return {"status": "patched" if patched else ("already_applied" if applied else "skipped"), "slots": slots}
+
+
+def extract_ion_dist_asar(app: Path) -> dict[str, Any]:
+    """4.23118+: unpack ion-dist.asar into the loose ion-dist/ directory.
+
+    The packaged app resolves the renderer root as
+    `isPackaged ? "ion-dist.asar" : "ion-dist"`, so every renderer-facing
+    patch (L2d/L9/L10 validators, local-feature UI injection, the zh-CN
+    localization helper) must operate on the archive. Rather than teaching
+    each patcher about asar internals, extract the payload once, let the
+    existing loose-file logic run unchanged, then rebuild the archive with
+    repack_ion_dist_asar().
+    """
+    asar = app / ION_DIST_ASAR_REL
+    loose = app / ION_DIST_LOOSE_REL
+    if not asar.exists() or (loose / "assets").is_dir():
+        return {"status": "skipped", "reason": "asar_missing_or_loose_assets_present"}
+    data = asar.read_bytes()
+    header_size, _header_string, header = read_asar_header(data, asar)
+    base = 8 + header_size
+    count = 0
+
+    def _walk(node: dict[str, Any], dir_path: Path) -> None:
+        nonlocal count
+        for name, child in node.get("files", {}).items():
+            target = dir_path / name
+            if "files" in child:
+                target.mkdir(parents=True, exist_ok=True)
+                _walk(child, target)
+            elif "offset" in child and not child.get("unpacked"):
+                start = base + int(child["offset"])
+                size = int(child["size"])
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data[start : start + size])
+                count += 1
+
+    _walk(header, loose)
+    return {"status": "extracted", "files": count}
+
+
+def repack_ion_dist_asar(app: Path, *, dry_run: bool = False) -> dict[str, Any]:
+    """Rebuild ion-dist.asar from the loose ion-dist/ directory.
+
+    File sizes may have changed (the L9 locale splice and the localization
+    helper rewrite/add files), so offsets and per-file integrity blocks are
+    recomputed for every entry and the Info.plist hash for the archive is
+    refreshed. The loose directory is removed afterwards: the packaged app
+    only reads the archive.
+    """
+    asar = app / ION_DIST_ASAR_REL
+    loose = app / ION_DIST_LOOSE_REL
+    if not (loose / "assets").is_dir():
+        return {"status": "skipped", "reason": "no_loose_assets"}
+    if dry_run:
+        return {"status": "would_repack"}
+    payload = bytearray()
+    header: dict[str, Any] = {"files": {}}
+    count = 0
+    for path in sorted(loose.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        content = path.read_bytes()
+        node: dict[str, Any] = {
+            "size": len(content),
+            "offset": str(len(payload)),
+            "integrity": calculate_file_integrity(content),
+        }
+        payload += content
+        parent = header
+        for part in path.relative_to(loose).parts[:-1]:
+            parent = parent["files"].setdefault(part, {"files": {}})
+        parent["files"][path.name] = node
+        count += 1
+    header_string = json.dumps(header, ensure_ascii=False, separators=(",", ":"))
+    header_bytes = header_string.encode("utf-8")
+    header_payload_size = align4(4 + len(header_bytes))
+    header_pickle = (
+        struct.pack("<I", header_payload_size)
+        + struct.pack("<i", len(header_bytes))
+        + header_bytes
+        + b"\0" * (header_payload_size - 4 - len(header_bytes))
+    )
+    asar.write_bytes(
+        struct.pack("<I", 4) + struct.pack("<I", 4 + header_payload_size) + header_pickle + bytes(payload)
+    )
+    integrity_updated = update_electron_asar_integrity_entry(app, "Resources/ion-dist.asar", header_string)
+    shutil.rmtree(loose)
+    return {"status": "repacked", "files": count, "electron_integrity_updated": integrity_updated}
 
 
 def patch_asar(app: Path, *, dry_run: bool = False) -> dict[str, Any]:
@@ -1610,14 +1895,39 @@ def main() -> int:
         if not args.check_only:
             if not args.dry_run:
                 quit_claude()
+            # 4.23118+: the renderer moved into ion-dist.asar. Unpack it so the
+            # loose-file renderer patchers (L2d/L9/L10, feature UI, zh-CN
+            # localization) keep working, and rebuild the archive afterwards.
+            ion_loose = target_app / ION_DIST_LOOSE_REL
+            pre_existing = {p.name for p in ion_loose.iterdir()} if ion_loose.is_dir() else None
+            ion_extract = extract_ion_dist_asar(target_app)
+            report["ion_dist_extract"] = ion_extract
             report["asar"] = patch_asar(target_app, dry_run=args.dry_run)
             report["renderer"] = patch_renderer(target_app, dry_run=args.dry_run)
             if args.feature_recovery:
                 report["local_feature_ui"] = patch_local_feature_ui(target_app, dry_run=args.dry_run)
             if args.lang:
                 report["localization"] = apply_localization(target_app, args.lang, args.user_home, dry_run=args.dry_run, set_user_config=args.install)
+            if ion_extract.get("status") == "extracted":
+                if args.dry_run:
+                    # Dry run must leave the bundle untouched: drop only what
+                    # the extraction added (the loose dir itself may ship files
+                    # like index.html in the stock bundle).
+                    for child in ion_loose.iterdir():
+                        if pre_existing is None or child.name not in pre_existing:
+                            if child.is_dir():
+                                shutil.rmtree(child, ignore_errors=True)
+                            else:
+                                child.unlink(missing_ok=True)
+                    report["ion_dist_repack"] = {"status": "skipped_dry_run"}
+                else:
+                    report["ion_dist_repack"] = repack_ion_dist_asar(target_app)
             report["app"] = app_metadata(target_app)
             if not args.dry_run:
+                # The Framework-embedded integrity digest must mirror the
+                # plist updates made above, and must be written before the
+                # app is re-signed.
+                report["asar_digest"] = update_electron_asar_digest(target_app)
                 report["signing"] = resign_app(target_app)
             else:
                 report["signing"] = {"status": "skipped_dry_run"}

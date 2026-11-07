@@ -127,9 +127,9 @@ python3 - <<'EOF'
 import json, struct
 asar = "/tmp/claude-new/Claude.app/Contents/Resources/app.asar"
 data = open(asar,'rb').read()
-hsize = struct.unpack('<I', data[12:16])[0]
-hdr = json.loads(data[16:16+hsize])
-base = 16 + hsize
+hsize = struct.unpack('<I', data[4:8])[0]          # ← header pickle size，在偏移 4
+hdr = json.loads(data[16:16+hsize])                # 注意：header string 在 16 起（省事读法）
+base = 8 + hsize                                   # ← payload 正确起点；16 + hsize 是常见错误（差 0-3 字节 padding）
 out = []
 def flat(node, path=''):
     if isinstance(node, dict) and 'offset' in node:
@@ -149,6 +149,11 @@ for p,o,s in out:
 print('extracted', sum(1 for p,_,_ in out if '.vite/build/' in p and p.endswith('.js')), 'build js files')
 EOF
 ```
+
+> ⚠️ **教训（2026-11-07）**：上面的 `hdr = json.loads(data[16:16+hsize])` 是「省事读法」——
+> `hsize` 实际读的是 pickle 里的 header string 长度，恰好能用但 `base = 16 + hsize` 与真实
+> payload 起点 `8 + header_size` 差 0-3 字节 padding，会让提取的文件头尾错位、`node --check`
+> 误报语法错误。**正式代码一律用脚本内的 `read_asar_header()`（base = 8 + header_size）**。
 
 ### 步骤 4 · grep 定位每层新特征码
 
@@ -170,27 +175,34 @@ grep -rl 'xhigh' . | head                            # L7
 - 找唯一前缀避免 ambiguous（如 `function me(e){return ce(e)?{ok:!0}:{ok:!1,reason:` 而非裸 `{ok:!1`）。
 - 若某层在新版已不存在/被原生处理，注释掉并记录「新版不再需要」（0811 的 L2b / L7 即如此）。
 
-#### ⚠️ 必须同时扫描 `ion-dist`（ASAR 之外）
+#### ⚠️ 必须同时扫描 renderer（2.31226 前：松散目录；4.23118 起：ion-dist.asar）
 
-`.vite/build/` 只是**主进程**。渲染进程在 `Contents/Resources/ion-dist/`，**不在 app.asar 内**，
+`.vite/build/` 只是**主进程**。渲染进程在 `Contents/Resources/ion-dist/`（2.31226 及以前为
+松散目录；**4.23118 起打包为 `Contents/Resources/ion-dist.asar`**，packaged App 只读 asar），
 且带着自己独立的一份模型校验器和语言列表。只扫 `.vite/build/` 会漏掉这两层，症状是：
 
 | 症状 | 漏掉的层 | 位置 |
 |---|---|---|
-| 报 `Doesn't look like an Anthropic model: 需要一个引用 Anthropic 模型的网关模型路由…` | L2d | `ion-dist/assets/v1/*.js` |
-| 语言文件已装好，但 Settings → Language 里没有中文 | L9 | `ion-dist/assets/v1/shared-*.js` |
+| 报 `Doesn't look like an Anthropic model: 需要一个引用 Anthropic 模型的网关模型路由…` | L2d | ion-dist（4.23118 起 `ion-dist.asar` 内 `assets/v1/c6f6cf4c2-*.js`） |
+| 语言文件已装好，但 Settings → Language 里没有中文 | L9 | ion-dist（4.23118 起 shared-99 与 shared-67 **两个文件**） |
+
+**脚本已自动化**：`extract_ion_dist_asar()` 把 asar 解包成松散目录让全部既有 patch/汉化逻辑
+工作，`repack_ion_dist_asar()` 重建 asar 并刷新 Info.plist 的 ion-dist.asar hash——
+正常情况下不需要手工操作，但排查时要知道这个机制。
+
+手工定位（4.23118 起先解包 ion-dist.asar，松散版直接 grep）：
 
 ```bash
-cd "/tmp/claude-new/Claude.app/Contents/Resources/ion-dist"
+cd "/tmp/claude-new/Claude.app/Contents/Resources/ion-dist"   # 4.23118 前为目录；后为 .asar（需先解包）
 grep -rla 'Doesn.t look like an Anthropic' .          # L2d
 grep -rla 'expected a gateway model route' .          # L2d
 grep -rla '\["en-US","de-DE","fr-FR","ko-KR","ja-JP"' .  # L9
 ```
 
-**这两个文件带内容哈希**（如 `ce459c687-B4NlOXPM.js`），文件名每个版本都变，
-必须**按内容定位**，脚本里用 `find_renderer_files()` 而非硬编码文件名。
-由于它们在 ASAR 外，等长替换不是硬性要求（无 ASAR layout 约束），但保持等长更安全；
-`resign_app()` 遍历 `Contents/` 全树，会自动重签这些散文件。
+**这些文件带内容哈希**（如 `c6f6cf4c2-mK6FedDX.js`），文件名每个版本都变，
+必须**按内容定位**，脚本里用 needle 而非硬编码文件名。
+由于它们在 ASAR 外（4.23118 前的松散版），等长替换不是硬性要求；重打包后
+`resign_app()` 会自动重签。
 
 ### 步骤 5 · 更新 `build_index_patch_specs()`
 
@@ -236,12 +248,21 @@ python3 patch_claude_3p_v2.py \
 node --check <提取的-bundle>.js
 ```
 
-**AI 验证通过标准**：dry-run 全层 `applied`（含 L2d / L9 两个 renderer 层）、JSON 报告无 `missing`/`ambiguous`、所有被 patch 文件 `node --check` 通过（CJS 模式）、`codesign --verify` OK。
+**AI 验证通过标准**：dry-run 全层 `applied`（含 L2d / L9 / L10 三个 renderer 层）、JSON 报告无 `missing`/`ambiguous`、所有被 patch 文件 `node --check` 通过（CJS 模式）、`codesign --verify` OK。
 
-> `node --check` 必须同时覆盖 **ASAR 内**（先按 asar header 提取到临时文件）和 **renderer 散文件**（`ion-dist/assets/v1/*.js` 直接检查）。
+> `node --check` 必须同时覆盖 **ASAR 内**（先按 asar header 提取到临时文件，**base = 8 + header_size**）
+> 和 **renderer 文件**（4.23118 起从 `ion-dist.asar` 提取后检查）。
+>
+> ⚠️ **Electron 44.5+（4.23118 起）改 asar 后必须重算 Framework 内嵌 digest**：
+> 脚本 `update_electron_asar_digest()` 已自动化（重签前执行），dry-run 报告里看 `asar_digest` 字段。
+> 若跳过，App 启动即崩 `FATAL: archive.cc:256 Failed to get integrity…`。
 >
 > 建议再补一次**幂等性检查**：对已打补丁的 App 重跑 dry-run，应全部报 `already_applied`；
 > 特别是 L9 的语言数组不能出现重复项（`"zh-CN","zh-CN"`）。
+>
+> ⚠️ **装机前必须真实启动一次临时 App**（`open /tmp/…/Claude.app` 后存活 ≥10s）：
+> dry-run / 幂等 / node --check / codesign 都拦不住「二进制内嵌校验数据失效」这类问题
+> （2026-11-07 的 digest 崩溃即为例）。
 
 ### 步骤 7 · 人工验证
 
